@@ -1,0 +1,7 @@
+default_version: "1"
+load_policy: explicit
+versions_to_load:
+  - "1"
+  - "2"
+auto_activate_on_load: true
+max_loaded_versions: 2

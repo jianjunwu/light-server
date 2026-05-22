@@ -89,6 +89,7 @@ class ModelManager:
                 api_path=model_config.get("api_path", "/predict"),
                 stream=model_config.get("stream", False),
             )
+            lit_api.config = model_config
             lit_api.pre_setup()
 
             request_queue = self.registry._manager.Queue()
@@ -252,6 +253,7 @@ def _inference_worker_wrapper(
             api_path=config.get("api_path", "/predict"),
             stream=config.get("stream", False),
         )
+        lit_api.config = config
         lit_api.pre_setup()
 
         _inference_worker(

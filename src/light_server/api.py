@@ -51,6 +51,7 @@ class LitAPI(ls.LitAPI):
             mcp=mcp,
             enable_async=enable_async,
         )
+        self.config: dict[str, Any] = {}
         self._logger: logging.Logger | None = None
 
     @property

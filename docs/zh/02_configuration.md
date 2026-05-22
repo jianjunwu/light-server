@@ -1,0 +1,161 @@
+[English](../en/02_configuration.md) | 简体中文
+
+# 配置详解
+
+`light-server` 使用 YAML 配置文件。完整的配置分为服务级（`server.yaml`）和模型级（`config.yaml`）。
+
+## 服务配置（server.yaml）
+
+### 完整模板
+
+```yaml
+server:
+  host: "0.0.0.0"
+  http_port: 8000
+  grpc_port: 8001
+  metrics_port: 8002
+  accelerator: "auto"
+  devices: "auto"
+  workers_per_device: 1
+  timeout: 30.0
+  log_level: "info"
+  num_api_servers: 1
+
+grpc:
+  enabled: true
+  max_workers: 10
+
+metrics:
+  enabled: true
+
+logging:
+  mode: "queue"
+  level: "info"
+  format: "json"
+  output: null
+  info_output: null
+  error_output: null
+  rotation: "daily"
+  rotate_by: "none"
+  max_size: 100
+  when: "midnight"
+  backup_count: 7
+
+model_repository:
+  path: "./model_repo"
+  control_mode: "explicit"
+  poll_interval: 5
+
+load_models:
+  - model_a
+  - model_b
+
+models:
+  - name: model_a
+    version: "1"
+    api_path: "/predict"
+    max_batch_size: 4
+    batch_timeout: 0.01
+    stream: false
+    accelerator: null
+    devices: null
+    workers_per_device: null
+
+webui:
+  enabled: true
+  report_retention_days: 30
+```
+
+### 字段说明
+
+#### `server`
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `host` | str | `0.0.0.0` | 监听地址，设为 `127.0.0.1` 仅本地访问 |
+| `http_port` | int | `8000` | HTTP 推理端口 |
+| `grpc_port` | int | `8001` | gRPC 端口 |
+| `metrics_port` | int | `8002` | Prometheus 指标端口 |
+| `accelerator` | str | `auto` | 加速器类型：`auto`/`cpu`/`gpu` |
+| `devices` | int/str | `auto` | 设备数量，`auto` 自动检测 |
+| `workers_per_device` | int | `1` | 每设备工作进程数 |
+| `timeout` | float | `30.0` | 请求超时（秒） |
+| `log_level` | str | `info` | 日志级别：`debug`/`info`/`warning`/`error` |
+| `num_api_servers` | int | `1` | HTTP API 服务器进程数，通常保持 1 以共享状态 |
+
+#### `model_repository`
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `path` | str | `./model_repo` | 模型仓库根目录，支持环境变量 `${VAR}` |
+| `control_mode` | str | `explicit` | 控制模式，见下 |
+| `poll_interval` | int | `5` | 轮询间隔（秒），`poll` 模式下生效 |
+
+**控制模式对比：**
+
+| 模式 | 行为 | 适用场景 |
+|------|------|----------|
+| `explicit` | 仅加载 `load_models` 列表中的模型 | 生产环境，精确控制 |
+| `poll` | 自动检测仓库变化，动态加载/卸载 | 开发环境 |
+| `none` | 加载仓库中所有可用模型 | 快速验证 |
+
+#### `models`（全局模型覆盖）
+
+`server.yaml` 中的 `models` 字段用于为特定模型设置全局默认值。单模型目录下的 `config.yaml` 具有更高优先级。
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` | str | — | 模型名称（必填） |
+| `version` | str | `1` | 版本号 |
+| `source` | str | `null` | 模块路径，CLI 内联模式使用 |
+| `api_path` | str | `/predict` | 自定义 API 路径 |
+| `max_batch_size` | int | `1` | 最大批处理大小，`1` 表示禁用 |
+| `batch_timeout` | float | `0.0` | 批处理超时（秒） |
+| `stream` | bool | `false` | 是否启用流式响应 |
+| `accelerator` | str | `null` | 覆盖全局加速器 |
+| `devices` | int/str | `null` | 覆盖全局设备数 |
+| `workers_per_device` | int | `null` | 覆盖全局每设备工作进程数 |
+
+## 模型配置（config.yaml）
+
+放在 `model_repo/{name}/{version}/config.yaml` 中，仅作用于当前版本。
+
+```yaml
+name: my_model
+api_path: /predict
+max_batch_size: 4
+batch_timeout: 0.01
+stream: false
+accelerator: cpu
+workers_per_device: 2
+```
+
+### 优先级规则
+
+当同一字段在多处定义时，优先级从高到低：
+
+1. **模型级 `config.yaml`**（最高优先级）
+2. **全局 `server.yaml` 中的 `models` 字段**
+3. **全局 `server.yaml` 中的 `server` 字段**（默认值）
+
+## 环境变量
+
+`model_repository.path` 支持环境变量展开：
+
+```yaml
+model_repository:
+  path: "${HOME}/models"
+```
+
+## 配置校验
+
+使用 CLI 验证配置：
+
+```bash
+light-server config-check server.yaml
+```
+
+## 下一步
+
+- [模型开发指南](03_model_development.md)
+- [CLI 命令参考](05_cli_reference.md)

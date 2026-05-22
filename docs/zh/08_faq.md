@@ -1,0 +1,124 @@
+[English](../en/08_faq.md) | 简体中文
+
+# 常见问题
+
+## 部署与运行
+
+### Q: macOS 上启动服务报错 `ModuleNotFoundError`
+
+**原因**：macOS 默认使用 `spawn` 模式启动子进程，worker 无法继承父进程的模块导入状态。
+
+**解决**：`light-server` 内部已处理此问题。worker 通过 `_inference_worker_wrapper` 在子进程中重新导入 `model.py`。确保：
+
+1. `model.py` 中的导入使用绝对路径或同级相对导入
+2. 模型目录下没有与 Python 标准库同名的文件
+
+### Q: 模型热重载不生效
+
+**检查清单**：
+
+1. `config.yaml` 中设置了 `hot_reload: true`
+2. `hot_reload_patterns` 包含修改的文件扩展名（如 `*.py`）
+3. 修改的是已加载版本的 `model.py`，而非未加载的版本
+4. 某些编辑器使用"原子保存"（先写临时文件再重命名），可能被忽略
+
+### Q: 端口被占用
+
+```
+OSError: [Errno 48] Address already in use
+```
+
+**解决**：
+
+```bash
+# 查找占用端口的进程
+lsof -i :8000
+# 或
+kill $(lsof -t -i:8000)
+```
+
+或在 `server.yaml` 中更换端口。
+
+### Q: 多个模型能否共享 GPU 显存
+
+**答**：可以。`setup(self, device)` 中加载的模型权重会在同一个进程的多个 worker 间共享（通过进程内共享）。但不同模型使用独立的 worker 进程组，显存不共享。如需共享，可将相关模型放在同一个 `model.py` 中，通过不同 `api_path` 暴露。
+
+---
+
+## 性能调优
+
+### Q: 如何确定最优的 `max_batch_size`
+
+**建议**：
+
+1. 先用 `light-server analyze` 自动搜索
+2. 手动测试几个值（1, 2, 4, 8, 16），观察吞吐和延迟
+3. 考虑 GPU 显存限制
+
+### Q: `batch_timeout` 设置多少合适
+
+**原则**：
+
+- 太短（< 0.001s）：批次太小，批处理优势不明显
+- 太长（> 0.1s）：单请求等待时间增加，延迟上升
+- **推荐**：从 0.01s 开始，根据实际负载调整
+
+### Q: 吞吐量上不去
+
+**排查步骤**：
+
+1. 检查 `workers_per_device`：GPU 通常设为 1，CPU 可适当增加
+2. 检查 `max_batch_size`：太小无法充分利用硬件
+3. 使用 `benchmark` 命令定位瓶颈
+4. 检查模型本身的 `predict` 是否有阻塞 IO
+
+---
+
+## 配置
+
+### Q: `control_mode` 选哪个
+
+| 模式 | 何时使用 |
+|------|----------|
+| `explicit` | **推荐生产环境**，精确控制加载哪些模型 |
+| `poll` | 开发环境，频繁修改模型 |
+| `none` | 快速验证，加载仓库中所有模型 |
+
+### Q: 如何覆盖单模型的加速器
+
+在模型级的 `config.yaml` 中设置：
+
+```yaml
+accelerator: gpu
+devices: 1
+workers_per_device: 2
+```
+
+优先级高于 `server.yaml` 中的全局配置。
+
+---
+
+## 制品打包
+
+### Q: `.lma` 文件是什么格式
+
+ZIP 压缩包，包含 `manifest.json`（元数据）和模型文件。可用任何 ZIP 工具解压查看。
+
+### Q: 签名验证失败怎么办
+
+```bash
+# 检查签名
+light-server unpack artifact.lma --verify-key public.pem --dry-run
+
+# 如果失败，可能是：
+# 1. 公钥不匹配
+# 2. 文件被篡改
+# 3. 打包时未签名但解包时要求验证
+```
+
+---
+
+## 下一步
+
+- [配置详解](02_configuration.md)
+- [运维指南](06_operations.md)

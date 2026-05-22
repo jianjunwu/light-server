@@ -171,51 +171,24 @@ model_repo/
 - `logging`：日志模式、格式、输出路径、轮转策略
 - `webui`：内置 Web 界面设置
 
-### 配置字段速查
+完整配置字段说明见 [配置详解](docs/zh/02_configuration.md)。
 
-**server**
+## 文档
 
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `host` | str | `0.0.0.0` | 监听地址 |
-| `http_port` | int | `8000` | HTTP 推理端口 |
-| `grpc_port` | int | `8001` | gRPC 端口 |
-| `metrics_port` | int | `8002` | Prometheus 指标端口 |
-| `accelerator` | str | `auto` | 加速器类型（cpu/gpu/auto） |
-| `devices` | int/str | `auto` | 设备数量 |
-| `workers_per_device` | int | `1` | 每设备工作进程数 |
-| `timeout` | float | `30.0` | 请求超时（秒） |
-| `log_level` | str | `info` | 日志级别 |
-| `num_api_servers` | int | `1` | HTTP API 服务器进程数 |
+详细文档见 [`docs/zh/`](docs/zh/) 目录：
 
-**model_repository**
+| 文档 | 内容 |
+|------|------|
+| [快速开始](docs/zh/01_getting_started.md) | 安装 + 3 分钟上手 |
+| [配置详解](docs/zh/02_configuration.md) | 完整配置字段说明 + 优先级规则 |
+| [模型开发指南](docs/zh/03_model_development.md) | LitAPI 生命周期 + 批处理/流式/指标/版本控制 |
+| [API 参考](docs/zh/04_api_reference.md) | HTTP/gRPC 端点 + 状态码 |
+| [CLI 命令参考](docs/zh/05_cli_reference.md) | 6 个子命令完整参数 |
+| [运维指南](docs/zh/06_operations.md) | Prometheus + 日志 + 制品打包 + 分析器 + WebUI |
+| [架构设计](docs/zh/07_architecture.md) | 进程模型 + 请求链路 + Mermaid 图 |
+| [FAQ](docs/zh/08_faq.md) | 常见问题与性能调优 |
 
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `path` | str | `./model_repo` | 模型仓库根目录 |
-| `control_mode` | str | `explicit` | `explicit` / `poll` / `none` |
-| `poll_interval` | int | `5` | 轮询间隔（秒，`poll` 模式） |
-
-**单模型配置（config.yaml 或 models 字段）**
-
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `name` | str | — | 模型名称 |
-| `version` | str | `1` | 版本号 |
-| `api_path` | str | `/predict` | 自定义 API 路径 |
-| `max_batch_size` | int | `1` | 最大批处理大小 |
-| `batch_timeout` | float | `0.0` | 批处理超时（秒） |
-| `stream` | bool | `false` | 是否启用流式响应 |
-| `accelerator` | str | `null` | 覆盖全局加速器 |
-| `workers_per_device` | int | `null` | 覆盖全局工作进程数 |
-
-## 架构
-
-- **`LightServer`**（`core/server.py`）：顶层编排器，创建注册表、传输层和各个服务器
-- **`ModelManager`**（`core/model_manager.py`）：通过 `mp.spawn` 动态加载/卸载模型
-- **`ModelRegistry`**（`core/registry.py`）：基于 `mp.Manager().dict()` 的跨进程共享状态
-- **HTTP handlers**（`http/handlers.py`）：异步推理，采用响应消费者模式
-- **Admin APIs**（`http/admin.py`）：模型生命周期管理和就绪检查
+英文文档见 [`docs/en/`](docs/en/)。
 
 ## 示例
 

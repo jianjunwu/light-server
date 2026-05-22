@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import fnmatch
+import itertools
 import logging
 import multiprocessing as mp
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -44,6 +46,9 @@ class ModelManager:
         self._artifact_model_paths: dict[str, Path] = {}
         # Small manager only for worker setup status (low-frequency, tiny data)
         self._setup_manager = mp.Manager()
+        # Atomic uid counters: one per model+version to avoid global lock contention
+        self._uid_counters: dict[str, itertools.count] = {}
+        self._uid_lock = threading.Lock()
 
     def _scan_plain_models(self, models: list[dict[str, Any]]) -> None:
         """Scan plain model subdirectories."""
@@ -207,12 +212,16 @@ class ModelManager:
         self.registry.register(name, version, model_config, model_type="litapi")
 
         try:
+            from light_server.core.loops import AdaptiveBatchedLoop
+
             LitAPIClass = load_litapi_from_file(model_py, suppress_prometheus=True)
+            max_batch_size = model_config.get("max_batch_size", 1)
             lit_api = LitAPIClass(
-                max_batch_size=model_config.get("max_batch_size", 1),
+                max_batch_size=max_batch_size,
                 batch_timeout=model_config.get("batch_timeout", 0.0),
                 api_path=model_config.get("api_path", "/predict"),
                 stream=model_config.get("stream", False),
+                loop=AdaptiveBatchedLoop() if max_batch_size > 1 else "auto",
             )
             lit_api.config = model_config
             lit_api.pre_setup()
@@ -302,6 +311,9 @@ class ModelManager:
 
             self._workers.pop(key, None)
 
+            # Clean up atomic uid counter for this model version
+            self._uid_counters.pop(key, None)
+
             # Invoke teardown hook on the LitAPI instance for framework-specific cleanup
             lit_api = self._litapi_instances.pop(key, None)
             if lit_api is not None:
@@ -367,8 +379,14 @@ class ModelManager:
         if self.system_metrics:
             self.system_metrics.inc_queue_depth(name, version)
 
-        import uuid
-        uid = str(uuid.uuid4())
+        # Atomic integer uid: avoids uuid4() overhead under high QPS
+        key = self._worker_key(name, version)
+        with self._uid_lock:
+            if key not in self._uid_counters:
+                self._uid_counters[key] = itertools.count()
+            seq = next(self._uid_counters[key])
+        # Use hyphen separator to avoid ambiguity when model names contain underscores
+        uid = f"{key}-{seq}-{time.monotonic_ns() & 0xFFFFFFFF:08x}"
         queue.put((response_queue_id, uid, time.monotonic(), payload))
         return uid
 
@@ -580,13 +598,17 @@ def _inference_worker_wrapper(
     callback_runner = CallbackRunner()
 
     try:
+        from light_server.core.loops import AdaptiveBatchedLoop
+
         # Reconstruct LitAPI in child process
         LitAPIClass = load_litapi_from_file(Path(model_py_path))
+        max_batch_size = config.get("max_batch_size", 1)
         lit_api = LitAPIClass(
-            max_batch_size=config.get("max_batch_size", 1),
+            max_batch_size=max_batch_size,
             batch_timeout=config.get("batch_timeout", 0.0),
             api_path=config.get("api_path", "/predict"),
             stream=config.get("stream", False),
+            loop=AdaptiveBatchedLoop() if max_batch_size > 1 else "auto",
         )
         lit_api.config = config
         lit_api.pre_setup()

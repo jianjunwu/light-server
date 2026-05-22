@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "light-server"
+version = "0.1.0"
+description = "Triton-style CLI and deployment server built on LitServe"
+requires-python = ">=3.10"
+dependencies = [
+    "litserve>=0.2.0",
+    "pyyaml>=6.0",
+    "grpcio>=1.50.0",
+    "prometheus-client>=0.15.0",
+]
+
+[project.scripts]
+light-server = "light_server.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/light_server"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"

@@ -1,0 +1,20 @@
+server:
+  http_port: 18000
+  grpc_port: 18001
+  metrics_port: 18002
+  host: 127.0.0.1
+  num_api_servers: 1
+  log_level: warning
+
+grpc:
+  enabled: false
+
+metrics:
+  enabled: false
+
+model_repository:
+  path: ./model_repo
+  control_mode: explicit
+
+load_models:
+  - test_model

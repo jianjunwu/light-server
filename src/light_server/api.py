@@ -60,3 +60,18 @@ class LitAPI(ls.LitAPI):
         if self._logger is None:
             self._logger = logging.getLogger(self.__class__.__module__ + "." + self.__class__.__name__)
         return self._logger
+
+    def on_file_changed(self, changed_files: list[str]) -> Any:
+        """Called when files in the model directory change (if hot_reload is enabled).
+
+        Override this method to implement custom reload logic for weights,
+        configs, vocab files, or any other model artifacts.
+
+        Args:
+            changed_files: List of absolute paths to files that have changed.
+
+        Returns:
+            Any non-None value suppresses the default fallback behavior
+            (which is to re-import changed .py modules).
+        """
+        return None

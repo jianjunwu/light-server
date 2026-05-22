@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -27,11 +29,47 @@ def _serve_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--log-max-size", type=int, default=100, help="Max log file size in MB (for size rotation)")
     parser.add_argument("--log-when", default="midnight", help="Rotation interval (for time rotation: H/D/midnight)")
     parser.add_argument("--log-backup-count", type=int, default=7, help="Number of backup log files to keep")
-    parser.add_argument("--model-repo", help="Model repository path")
+    parser.add_argument("--model-repo", help="Model repository path (directory containing models or .lma files)")
     parser.add_argument("--grpc-port", type=int, default=8001, help="gRPC port")
     parser.add_argument("--metrics-port", type=int, default=8002, help="Metrics port")
     parser.add_argument("--no-grpc", action="store_true", help="Disable gRPC")
     parser.add_argument("--no-metrics", action="store_true", help="Disable metrics")
+
+
+def _benchmark_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--url", default="http://127.0.0.1:8000", help="Server base URL")
+    parser.add_argument("--model", required=True, help="Model name")
+    parser.add_argument("--version", default=None, help="Model version (default: active)")
+    parser.add_argument("--concurrency", type=int, default=8, help="Number of concurrent requests")
+    parser.add_argument("--duration", type=float, default=30.0, help="Benchmark duration in seconds")
+    parser.add_argument("--mode", default="fixed", choices=["fixed", "ramp"], help="Load mode")
+    parser.add_argument("--max-concurrency", type=int, default=64, help="Max concurrency for ramp mode")
+    parser.add_argument("--step-duration", type=float, default=10.0, help="Seconds per ramp step")
+    parser.add_argument("--payload", default='{"input": 1.0}', help="Request payload (JSON string)")
+    parser.add_argument("--output", help="Output file path for JSON results")
+
+
+def _analyze_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--model-repo", default="./model_repo", help="Model repository path")
+    parser.add_argument("--model", required=True, help="Model name to analyze")
+    parser.add_argument("--output-dir", default="./reports", help="Directory to save reports")
+
+
+def _pack_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("model_dir", help="Path to model directory (e.g., model_repo/test_model)")
+    parser.add_argument("--version", "-v", required=True, help="Model version (semver)")
+    parser.add_argument("--output", "-o", default="./artifacts", help="Output directory")
+    parser.add_argument("--build-id", help="Custom build ID (default: auto-generated)")
+    parser.add_argument("--sign-key", help="Path to Ed25519 private key PEM for signing")
+    parser.add_argument("--signer", default="", help="Signer identity string")
+    parser.add_argument("--ignore", action="append", help="Additional ignore patterns (can repeat)")
+
+
+def _unpack_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("artifact", help="Path to .lma artifact file")
+    parser.add_argument("--to", dest="target_dir", default=".", help="Target directory for extraction")
+    parser.add_argument("--verify-key", help="Path to Ed25519 public key PEM for signature verification")
+    parser.add_argument("--dry-run", action="store_true", help="Validate only, do not extract")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -46,12 +84,36 @@ def main(argv: list[str] | None = None) -> int:
     check_parser = subparsers.add_parser("config-check", help="Validate configuration file")
     check_parser.add_argument("config", help="Path to YAML configuration file")
 
+    # benchmark
+    benchmark_parser = subparsers.add_parser("benchmark", help="Run performance benchmark against a running server")
+    _benchmark_args(benchmark_parser)
+
+    # analyze
+    analyze_parser = subparsers.add_parser("analyze", help="Run Model Analyzer to find optimal configuration")
+    _analyze_args(analyze_parser)
+
+    # pack
+    pack_parser = subparsers.add_parser("pack", help="Pack a model directory into a .lma artifact")
+    _pack_args(pack_parser)
+
+    # unpack
+    unpack_parser = subparsers.add_parser("unpack", help="Unpack a .lma artifact")
+    _unpack_args(unpack_parser)
+
     args = parser.parse_args(argv)
 
     if args.command == "serve":
         return _cmd_serve(args)
     if args.command == "config-check":
         return _cmd_config_check(args)
+    if args.command == "benchmark":
+        return _cmd_benchmark(args)
+    if args.command == "analyze":
+        return _cmd_analyze(args)
+    if args.command == "pack":
+        return _cmd_pack(args)
+    if args.command == "unpack":
+        return _cmd_unpack(args)
 
     parser.print_help()
     return 1
@@ -72,6 +134,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             log_dir.mkdir(parents=True, exist_ok=True)
             log_info = str(log_dir / "info.log")
             log_error = str(log_dir / "error.log")
+
+        model_repo_path = args.model_repo or "./model_repo"
 
         config = Config(
             server=ServerConfig(
@@ -96,7 +160,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
                 backup_count=args.log_backup_count,
             ),
             model_repository=ModelRepositoryConfig(
-                path=args.model_repo or "./model_repo",
+                path=model_repo_path,
                 control_mode="none",
             ),
         )
@@ -128,3 +192,150 @@ def _cmd_config_check(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"Configuration error: {e}", file=sys.stderr)
         return 1
+
+
+def _cmd_benchmark(args: argparse.Namespace) -> int:
+    from light_server.analyzer.benchmark import BenchmarkEngine, HttpBenchmarkTarget
+
+    async def run() -> None:
+        payload = json.loads(args.payload)
+        target = HttpBenchmarkTarget(
+            base_url=args.url,
+            model_name=args.model,
+            version=args.version,
+        )
+        engine = BenchmarkEngine()
+        result = await engine.run(
+            target=target,
+            payload=payload,
+            mode=args.mode,  # type: ignore[arg-type]
+            concurrency=args.concurrency,
+            duration=args.duration,
+            max_concurrency=args.max_concurrency,
+            step_duration=args.step_duration,
+        )
+        await target.close()
+
+        print(f"\nBenchmark Results ({args.model}):")
+        print(f"  Mode:            {args.mode}")
+        print(f"  Duration:        {result.duration_seconds}s")
+        print(f"  Total requests:  {result.total_requests}")
+        print(f"  Success:         {result.successful_requests}")
+        print(f"  Failed:          {result.failed_requests}")
+        print(f"  Throughput:      {result.throughput} req/s")
+        print(f"  Latency (ms):")
+        print(f"    mean: {result.latency_ms.mean}")
+        print(f"    p50:  {result.latency_ms.p50}")
+        print(f"    p90:  {result.latency_ms.p90}")
+        print(f"    p99:  {result.latency_ms.p99}")
+        print(f"    p99.9:{result.latency_ms.p99_9}")
+        if result.errors:
+            print(f"  Sample errors:   {result.errors[:3]}")
+
+        if args.output:
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "model": args.model,
+                    "version": args.version,
+                    "mode": args.mode,
+                    "duration": result.duration_seconds,
+                    "throughput": result.throughput,
+                    "latency_ms": {
+                        "mean": result.latency_ms.mean,
+                        "p50": result.latency_ms.p50,
+                        "p90": result.latency_ms.p90,
+                        "p99": result.latency_ms.p99,
+                        "p99_9": result.latency_ms.p99_9,
+                        "min": result.latency_ms.min,
+                        "max": result.latency_ms.max,
+                    },
+                    "total_requests": result.total_requests,
+                    "successful_requests": result.successful_requests,
+                    "failed_requests": result.failed_requests,
+                    "errors": result.errors,
+                }, indent=2))
+            print(f"\nResults saved to {args.output}")
+
+    try:
+        asyncio.run(run())
+    except Exception as e:
+        print(f"Benchmark failed: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cmd_analyze(args: argparse.Namespace) -> int:
+    from light_server.analyzer.runner import AnalysisRunner
+
+    async def run() -> int:
+        runner = AnalysisRunner(repo_path=args.model_repo)
+        report = await runner.run(
+            model_name=args.model,
+            output_dir=args.output_dir,
+        )
+        print(f"\nAnalysis complete. Pareto optimal configurations: {len(report.pareto_frontier)}")
+        return 0
+
+    try:
+        return asyncio.run(run())
+    except Exception as e:
+        print(f"Analysis failed: {e}", file=sys.stderr)
+        return 1
+
+
+def _cmd_pack(args: argparse.Namespace) -> int:
+    from light_server.artifact.packer import ModelPacker
+
+    model_dir = Path(args.model_dir)
+    if not model_dir.exists():
+        print(f"Model directory not found: {model_dir}", file=sys.stderr)
+        return 1
+
+    packer = ModelPacker(
+        model_dir=model_dir,
+        version=args.version,
+        build_id=args.build_id,
+        ignore_patterns=args.ignore,
+    )
+    artifact_path = packer.pack(Path(args.output))
+
+    if args.sign_key:
+        private_key_pem = Path(args.sign_key).read_bytes()
+        packer.sign(private_key_pem, signer=args.signer)
+        print(f"Signed artifact: {artifact_path}")
+    else:
+        print(f"Packed artifact: {artifact_path}")
+
+    return 0
+
+
+def _cmd_unpack(args: argparse.Namespace) -> int:
+    from light_server.artifact.unpacker import ModelUnpacker
+
+    artifact_path = Path(args.artifact)
+    if not artifact_path.exists():
+        print(f"Artifact not found: {artifact_path}", file=sys.stderr)
+        return 1
+
+    public_key_pem: bytes | None = None
+    if args.verify_key:
+        public_key_pem = Path(args.verify_key).read_bytes()
+
+    unpacker = ModelUnpacker(artifact_path)
+    try:
+        manifest = unpacker.validate(public_key_pem=public_key_pem)
+    except Exception as e:
+        print(f"Validation failed: {e}", file=sys.stderr)
+        return 1
+
+    print(f"Artifact: {manifest.name} v{manifest.version} ({manifest.build_id})")
+    print(f"  Files: {len(manifest.files)}")
+
+    if args.dry_run:
+        print("Dry run: validation passed, not extracting.")
+        return 0
+
+    target_dir = Path(args.target_dir)
+    model_dir = unpacker.unpack(target_dir)
+    print(f"Extracted to: {model_dir}")
+    return 0

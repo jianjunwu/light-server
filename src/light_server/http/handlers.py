@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from light_server.core.ensemble import EnsembleExecutor
 from light_server.core.server import LightServer
 from litserve.utils import LitAPIStatus, ResponseBufferItem
 
@@ -25,34 +26,112 @@ def create_inference_routes(app: FastAPI, server: LightServer) -> None:
 
     @app.post("/v2/models/{model_name}/infer")
     async def infer(model_name: str, request: Request) -> JSONResponse:
-        if not server.registry.is_ready(model_name):
-            raise HTTPException(status_code=404, detail=f"Model {model_name} not ready")
+        """Inference against the active version of a model."""
+        return await _do_infer(server, model_name, None, request)
+
+    @app.post("/v2/models/{model_name}/versions/{version}/infer")
+    async def infer_version(model_name: str, version: str, request: Request) -> JSONResponse:
+        """Inference against a specific version of a model."""
+        return await _do_infer(server, model_name, version, request)
+
+
+async def _do_infer(server: LightServer, model_name: str, version: str | None, request: Request) -> JSONResponse:
+    resolved_version = version or server.registry.get_active_version(model_name) or "unknown"
+    server.system_metrics.record_request_start(model_name, resolved_version)
+
+    status = "2xx"
+    try:
+        if not server.registry.is_ready(model_name, version):
+            status = "4xx"
+            detail = f"Model {model_name}"
+            if version:
+                detail += f" version {version}"
+            detail += " not ready"
+            raise HTTPException(status_code=404, detail=detail)
 
         payload = await request.json()
 
-        try:
-            uid = server.model_manager.infer(model_name, payload, response_queue_id=0)
+        entry = server.registry.get(model_name, version)
+        if entry is not None and entry.get("model_type") == "ensemble":
+            result = await _do_ensemble_infer(server, model_name, version, payload)
+        else:
+            result = await _do_litapi_infer(server, model_name, version, payload)
 
-            # Create event and wait for response
-            event = asyncio.Event()
-            server.response_buffer[uid] = ResponseBufferItem(event=event)
+        return result
 
-            await asyncio.wait_for(event.wait(), timeout=server.config.server.timeout)
+    except HTTPException as e:
+        status = "5xx" if e.status_code >= 500 else "4xx"
+        raise
+    except asyncio.TimeoutError:
+        status = "timeout"
+        raise
+    except Exception:
+        status = "5xx"
+        raise
+    finally:
+        server.system_metrics.record_request_end(model_name, resolved_version, status)
 
-            response_item = server.response_buffer.pop(uid)
-            response_data, status = response_item.response
 
-            if status == LitAPIStatus.ERROR:
-                raise HTTPException(status_code=500, detail="Inference error")
+async def _do_ensemble_infer(
+    server: LightServer, model_name: str, version: str | None, payload: dict[str, Any]
+) -> JSONResponse:
+    """Execute an ensemble DAG and return the final step's output."""
+    entry = server.registry.get(model_name, version)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Model {model_name} not found")
 
-            return JSONResponse(response_data)
+    ensemble_config = entry.get("ensemble_config")
+    if ensemble_config is None:
+        raise HTTPException(status_code=500, detail="Ensemble config missing")
 
-        except asyncio.TimeoutError:
-            server.response_buffer.pop(uid, None)
-            raise HTTPException(status_code=504, detail="Inference timeout")
-        except Exception as e:
-            logger.exception(f"Inference error for {model_name}: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+    try:
+        executor = EnsembleExecutor()
+        result = await executor.execute(server, ensemble_config, payload, ensemble_name=model_name)
+        return JSONResponse(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Ensemble inference error for {model_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _do_litapi_infer(
+    server: LightServer, model_name: str, version: str | None, payload: dict[str, Any]
+) -> JSONResponse:
+    """Submit inference to a LitAPI worker and await response."""
+    uid = None
+    try:
+        uid = server.model_manager.infer(
+            model_name, payload, version=version, response_queue_id=0
+        )
+
+        event = asyncio.Event()
+        server.response_buffer[uid] = ResponseBufferItem(event=event)
+
+        await asyncio.wait_for(
+            event.wait(), timeout=server.config.server.timeout
+        )
+
+        response_item = server.response_buffer.pop(uid)
+        response_data, status = response_item.response
+
+        if status == LitAPIStatus.ERROR:
+            raise HTTPException(status_code=500, detail="Inference error")
+
+        return JSONResponse(response_data)
+
+    except asyncio.TimeoutError:
+        server.response_buffer.pop(uid, None)
+        raise HTTPException(status_code=504, detail="Inference timeout")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Inference error for {model_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if uid is not None:
+            resolved_version = version or server.registry.get_active_version(model_name) or "unknown"
+            server.system_metrics.dec_queue_depth(model_name, resolved_version)
 
 
 async def _response_consumer(server: LightServer) -> None:

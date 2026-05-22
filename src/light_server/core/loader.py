@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -10,7 +11,11 @@ from types import ModuleType
 from litserve import LitAPI
 
 
-def import_module_from_file(file_path: Path, module_name: str | None = None) -> ModuleType:
+def import_module_from_file(
+    file_path: Path,
+    module_name: str | None = None,
+    suppress_prometheus: bool = False,
+) -> ModuleType:
     """Import a Python module from a file path."""
     file_path = Path(file_path).resolve()
     if not file_path.exists():
@@ -28,7 +33,39 @@ def import_module_from_file(file_path: Path, module_name: str | None = None) -> 
 
     module = importlib.util.module_from_spec(spec)
     sys.modules[unique_name] = module
-    spec.loader.exec_module(module)
+
+    # Allow absolute imports of sibling modules in the same directory
+    parent_dir = str(file_path.parent)
+    added_to_path = False
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+        added_to_path = True
+
+    # In the main process, temporarily suppress prometheus metric registration
+    # to avoid duplicate errors when reloading model files. Workers need real
+    # registration (via multiproc mode), so we only patch when explicitly asked.
+    _prometheus_patched = False
+    try:
+        if suppress_prometheus:
+            import prometheus_client
+            _original_register = prometheus_client.REGISTRY.register
+            prometheus_client.REGISTRY.register = lambda *args, **kwargs: None
+            _prometheus_patched = True
+    except Exception:
+        pass
+
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if added_to_path:
+            sys.path.remove(parent_dir)
+        if _prometheus_patched:
+            try:
+                import prometheus_client
+                prometheus_client.REGISTRY.register = _original_register
+            except Exception:
+                pass
+
     return module
 
 
@@ -63,7 +100,11 @@ def load_litapi_from_module(module_path: str, class_name: str | None = None) -> 
     return find_litapi_class(module)
 
 
-def load_litapi_from_file(file_path: Path) -> type[LitAPI]:
+def load_litapi_from_file(
+    file_path: Path, suppress_prometheus: bool = False
+) -> type[LitAPI]:
     """Load a LitAPI class from a model.py file."""
-    module = import_module_from_file(file_path)
+    module = import_module_from_file(
+        file_path, suppress_prometheus=suppress_prometheus
+    )
     return find_litapi_class(module)

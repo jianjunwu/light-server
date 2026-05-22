@@ -1,0 +1,4 @@
+name: preprocess
+api_path: /preprocess
+max_batch_size: 1
+accelerator: cpu

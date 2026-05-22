@@ -1,0 +1,11 @@
+name: advanced_model
+api_path: /predict
+max_batch_size: 4
+batch_timeout: 0.01
+accelerator: cpu
+addend: 100
+hot_reload: true
+hot_reload_interval: 1.0
+hot_reload_patterns:
+  - "*.py"
+  - "*.yaml"

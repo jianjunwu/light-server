@@ -1,0 +1,5 @@
+name: predict
+api_path: /predict
+max_batch_size: 4
+batch_timeout: 0.01
+accelerator: cpu

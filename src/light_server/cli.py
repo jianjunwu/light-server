@@ -72,6 +72,21 @@ def _unpack_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dry-run", action="store_true", help="Validate only, do not extract")
 
 
+def _init_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("project_name", nargs="?", help="Project directory name")
+    parser.add_argument("--template", "-t", default="empty", choices=["empty", "llm", "cv-classify", "cv-detect", "nlp"], help="Project template")
+    parser.add_argument("--model-name", "-m", default="my_model", help="Model name")
+    parser.add_argument("--grpc", action="store_true", default=True, help="Enable gRPC (default: true)")
+    parser.add_argument("--no-grpc", action="store_true", help="Disable gRPC")
+    parser.add_argument("--metrics", action="store_true", default=True, help="Enable metrics (default: true)")
+    parser.add_argument("--no-metrics", action="store_true", help="Disable metrics")
+    parser.add_argument("--webui", action="store_true", default=True, help="Enable Web UI (default: true)")
+    parser.add_argument("--no-webui", action="store_true", help="Disable Web UI")
+    parser.add_argument("--batch", action="store_true", help="Enable dynamic batching")
+    parser.add_argument("--stream", action="store_true", help="Enable streaming responses")
+    parser.add_argument("--output-dir", "-o", default=".", help="Output directory for the project")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="light-server", description="Light Server - Triton-style deployment on LitServe")
     subparsers = parser.add_subparsers(dest="command", help="Commands")
@@ -100,6 +115,10 @@ def main(argv: list[str] | None = None) -> int:
     unpack_parser = subparsers.add_parser("unpack", help="Unpack a .lma artifact")
     _unpack_args(unpack_parser)
 
+    # init
+    init_parser = subparsers.add_parser("init", help="Initialize a new light-server project")
+    _init_args(init_parser)
+
     args = parser.parse_args(argv)
 
     if args.command == "serve":
@@ -114,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_pack(args)
     if args.command == "unpack":
         return _cmd_unpack(args)
+    if args.command == "init":
+        return _cmd_init(args)
 
     parser.print_help()
     return 1
@@ -338,4 +359,45 @@ def _cmd_unpack(args: argparse.Namespace) -> int:
     target_dir = Path(args.target_dir)
     model_dir = unpacker.unpack(target_dir)
     print(f"Extracted to: {model_dir}")
+    return 0
+
+
+def _cmd_init(args: argparse.Namespace) -> int:
+    from light_server.init import ProjectGenerator, run_wizard
+
+    if args.project_name:
+        # Non-interactive mode
+        grpc = not args.no_grpc if args.no_grpc else args.grpc
+        metrics = not args.no_metrics if args.no_metrics else args.metrics
+        webui = not args.no_webui if args.no_webui else args.webui
+
+        options = {
+            "model_name": args.model_name,
+            "grpc": grpc,
+            "metrics": metrics,
+            "webui": webui,
+            "batch": args.batch,
+            "stream": args.stream,
+        }
+        generator = ProjectGenerator(
+            project_name=args.project_name,
+            template=args.template,
+            output_dir=args.output_dir,
+            options=options,
+        )
+        try:
+            root = generator.generate()
+        except FileExistsError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        print(f"Created project at: {root}")
+        print(f"\nNext steps:")
+        print(f"  cd {root.name}")
+        print(f"  light-server serve --config server.yaml")
+        print(f"  # In another terminal:")
+        print(f"  python test_request.py")
+        return 0
+
+    # Interactive mode
+    run_wizard(output_dir=args.output_dir)
     return 0

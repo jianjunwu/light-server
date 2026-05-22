@@ -19,6 +19,14 @@ def _serve_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workers-per-device", type=int, default=1, help="Workers per device")
     parser.add_argument("--timeout", type=float, default=30.0, help="Request timeout")
     parser.add_argument("--log-level", default="info", help="Logging level")
+    parser.add_argument("--log-dir", help="Log directory (creates info.log and error.log)")
+    parser.add_argument("--log-info", help="Info log file path")
+    parser.add_argument("--log-error", help="Error log file path")
+    parser.add_argument("--log-format", default="json", choices=["json", "text"], help="Log format")
+    parser.add_argument("--log-rotate-by", default="none", choices=["none", "size", "time"], help="Rotation strategy")
+    parser.add_argument("--log-max-size", type=int, default=100, help="Max log file size in MB (for size rotation)")
+    parser.add_argument("--log-when", default="midnight", help="Rotation interval (for time rotation: H/D/midnight)")
+    parser.add_argument("--log-backup-count", type=int, default=7, help="Number of backup log files to keep")
     parser.add_argument("--model-repo", help="Model repository path")
     parser.add_argument("--grpc-port", type=int, default=8001, help="gRPC port")
     parser.add_argument("--metrics-port", type=int, default=8002, help="Metrics port")
@@ -55,7 +63,16 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     if args.config:
         config = load_config(args.config)
     else:
-        from light_server.config import Config, GrpcConfig, MetricsConfig, ModelRepositoryConfig, ServerConfig
+        from light_server.config import Config, GrpcConfig, LoggingConfig, MetricsConfig, ModelRepositoryConfig, ServerConfig
+
+        log_info = args.log_info
+        log_error = args.log_error
+        if args.log_dir and not (log_info or log_error):
+            log_dir = Path(args.log_dir)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_info = str(log_dir / "info.log")
+            log_error = str(log_dir / "error.log")
+
         config = Config(
             server=ServerConfig(
                 http_port=args.port,
@@ -68,6 +85,16 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             ),
             grpc=GrpcConfig(enabled=not args.no_grpc, max_workers=10),
             metrics=MetricsConfig(enabled=not args.no_metrics),
+            logging=LoggingConfig(
+                level=args.log_level,
+                format=args.log_format,
+                info_output=log_info,
+                error_output=log_error,
+                rotate_by=args.log_rotate_by,
+                max_size=args.log_max_size,
+                when=args.log_when,
+                backup_count=args.log_backup_count,
+            ),
             model_repository=ModelRepositoryConfig(
                 path=args.model_repo or "./model_repo",
                 control_mode="none",

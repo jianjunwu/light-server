@@ -25,11 +25,13 @@ class ModelManager:
         registry: ModelRegistry,
         transport: Any | None = None,
         callback_runner: Any | None = None,
+        log_queue: Any | None = None,
     ):
         self.repo_path = Path(repo_path)
         self.registry = registry
         self.transport = transport
         self.callback_runner = callback_runner
+        self.log_queue = log_queue
         self._workers: dict[str, list[mp.Process]] = {}
         self._litapi_instances: dict[str, LitAPI] = {}
         self._workers_setup_status: dict[str, Any] = {}
@@ -199,7 +201,7 @@ class ModelManager:
             ctx = mp.get_context("spawn")
             p = ctx.Process(
                 target=_inference_worker_wrapper,
-                args=(model_py_path, config, device, worker_id, request_queue, self.transport, workers_setup_status),
+                args=(model_py_path, config, device, worker_id, request_queue, self.transport, workers_setup_status, self.log_queue),
                 name=f"inference-worker-{name}-{worker_id}",
             )
             p.start()
@@ -228,11 +230,16 @@ def _inference_worker_wrapper(
     request_queue: Any,
     transport: Any,
     workers_setup_status: Any,
+    log_queue: Any | None = None,
 ) -> None:
     """Worker entry point: reconstruct LitAPI in child process from file path."""
     from litserve.callbacks.base import CallbackRunner
     from litserve.loops.loops import inference_worker as _inference_worker
     from light_server.core.loader import load_litapi_from_file
+
+    if log_queue is not None:
+        from light_server.logging.queue_handler import setup_worker_logging
+        setup_worker_logging(log_queue, level=config.get("log_level", "INFO"))
 
     callback_runner = CallbackRunner()
 

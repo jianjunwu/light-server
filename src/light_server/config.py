@@ -41,7 +41,13 @@ class LoggingConfig:
     level: str = "info"
     format: str = "json"
     output: str | None = None
+    info_output: str | None = None
+    error_output: str | None = None
     rotation: str = "daily"
+    rotate_by: str = "none"  # none | size | time
+    max_size: int = 100  # MB
+    when: str = "midnight"
+    backup_count: int = 7
 
 
 @dataclass

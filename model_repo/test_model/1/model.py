@@ -1,4 +1,4 @@
-import litserve as ls
+import light_server as ls
 
 class TestModel(ls.LitAPI):
     def setup(self, device):
@@ -8,6 +8,7 @@ class TestModel(ls.LitAPI):
         return request["input"]
 
     def predict(self, x):
+        self.logger.info(f"predict called with input={x}")
         return self.model(x)
 
     def encode_response(self, output):

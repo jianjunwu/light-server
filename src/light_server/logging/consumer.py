@@ -1,31 +1,56 @@
-"""Log consumer thread that reads from queue and writes to files/stdout."""
+"""Log consumer thread that reads from queue and writes to files with rotation."""
 
 from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import multiprocessing as mp
-import sys
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 
+class _JSONFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps(
+            {
+                "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+                "level": record.levelname,
+                "logger": record.name,
+                "message": record.getMessage(),
+                "process": record.process,
+                "processName": record.processName,
+            },
+            ensure_ascii=False,
+        )
+
+
 class LogConsumer:
-    """Consumes log records from a multiprocessing queue."""
+    """Consumes log records from a multiprocessing queue and writes to rotated files."""
 
     def __init__(
         self,
         queue: mp.Queue,
         level: str = "INFO",
         fmt: str = "json",
-        output: str | None = None,
+        info_output: str | None = None,
+        error_output: str | None = None,
+        rotate_by: str = "none",
+        max_size: int = 100,
+        when: str = "midnight",
+        backup_count: int = 7,
     ) -> None:
         self.queue = queue
         self.level = getattr(logging, level.upper(), logging.INFO)
         self.fmt = fmt
-        self.output = Path(output) if output else None
+        self.info_output = info_output
+        self.error_output = error_output
+        self.rotate_by = rotate_by
+        self.max_size = max_size
+        self.when = when
+        self.backup_count = backup_count
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
@@ -38,14 +63,44 @@ class LogConsumer:
         if self._thread:
             self._thread.join(timeout=2)
 
-    def _run(self) -> None:
-        handlers: list[Any] = []
-        if self.output:
-            self.output.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(self.output / "light-server.log")
-            handlers.append(file_handler)
+    def _build_handler(self, path: str, level: int) -> logging.Handler:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+        if self.rotate_by == "size":
+            handler: logging.Handler = logging.handlers.RotatingFileHandler(
+                path,
+                maxBytes=self.max_size * 1024 * 1024,
+                backupCount=self.backup_count,
+            )
+        elif self.rotate_by == "time":
+            handler = logging.handlers.TimedRotatingFileHandler(
+                path,
+                when=self.when,
+                backupCount=self.backup_count,
+            )
         else:
-            handlers.append(logging.StreamHandler(sys.stdout))
+            handler = logging.FileHandler(path)
+
+        handler.setLevel(level)
+
+        if self.fmt == "json":
+            formatter: logging.Formatter = _JSONFormatter()
+        else:
+            formatter = logging.Formatter(
+                "%(asctime)s - %(processName)s[%(process)d] - %(name)s - %(levelname)s - %(message)s"
+            )
+        handler.setFormatter(formatter)
+        return handler
+
+    def _run(self) -> None:
+        handlers: list[tuple[str, logging.Handler]] = []
+        if self.info_output:
+            handlers.append(("info", self._build_handler(self.info_output, logging.INFO)))
+        if self.error_output:
+            handlers.append(("error", self._build_handler(self.error_output, logging.ERROR)))
+
+        if not handlers:
+            return
 
         while not self._stop_event.is_set():
             try:
@@ -53,25 +108,6 @@ class LogConsumer:
             except Exception:
                 continue
 
-            if record.levelno < self.level:
-                continue
-
-            msg = self._format(record)
-            for h in handlers:
-                try:
-                    h.stream.write(msg + "\n")
-                    h.stream.flush()
-                except Exception:
-                    pass
-
-    def _format(self, record: logging.LogRecord) -> str:
-        if self.fmt == "json":
-            return json.dumps({
-                "timestamp": datetime.fromtimestamp(record.created).isoformat(),
-                "level": record.levelname,
-                "logger": record.name,
-                "message": record.getMessage(),
-                "process": record.process,
-                "processName": record.processName,
-            }, ensure_ascii=False)
-        return f"{datetime.fromtimestamp(record.created).isoformat()} - {record.processName}[{record.process}] - {record.name} - {record.levelname} - {record.getMessage()}"
+            for _name, handler in handlers:
+                if record.levelno >= handler.level:
+                    handler.emit(record)

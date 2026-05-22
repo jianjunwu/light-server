@@ -41,10 +41,15 @@ class LightServer:
         transport_config.manager = self.manager
         self.transport = create_transport_from_config(transport_config)
 
+        self._log_queue: Any | None = None
+        self._log_consumer: Any | None = None
+        self._setup_logging()
+
         self.model_manager = ModelManager(
             repo_path=Path(config.model_repository.path),
             registry=self.registry,
             transport=self.transport,
+            log_queue=self._log_queue,
         )
 
         self._shutdown_event = threading.Event()
@@ -59,6 +64,36 @@ class LightServer:
     def _build_http_app(self) -> FastAPI:
         from light_server.http.app import create_app
         return create_app(self)
+
+    def _setup_logging(self) -> None:
+        log_cfg = self.config.logging
+        if not log_cfg.info_output and not log_cfg.error_output:
+            return
+
+        self._log_queue = self.manager.Queue()
+
+        from light_server.logging.consumer import LogConsumer
+        from light_server.logging.queue_handler import MPQueueHandler
+
+        self._log_consumer = LogConsumer(
+            queue=self._log_queue,
+            level=log_cfg.level,
+            fmt=log_cfg.format,
+            info_output=log_cfg.info_output,
+            error_output=log_cfg.error_output,
+            rotate_by=log_cfg.rotate_by,
+            max_size=log_cfg.max_size,
+            when=log_cfg.when,
+            backup_count=log_cfg.backup_count,
+        )
+        self._log_consumer.start()
+
+        # Main process also sends logs through the queue so everything lands in the same files
+        root = logging.getLogger()
+        root.setLevel(getattr(logging, log_cfg.level.upper(), logging.INFO))
+        queue_handler = MPQueueHandler(self._log_queue)
+        queue_handler.setLevel(getattr(logging, log_cfg.level.upper(), logging.INFO))
+        root.addHandler(queue_handler)
 
     def run(self) -> None:
         """Start all services."""
@@ -105,6 +140,7 @@ class LightServer:
             port=port,
             log_level=log_level,
             workers=1,
+            log_config=None,
         )
         server = uvicorn.Server(uvconfig)
 
@@ -175,5 +211,7 @@ class LightServer:
             self._grpc_server.stop(5)
         if self._metrics_server:
             self._metrics_server.shutdown()
+        if self._log_consumer:
+            self._log_consumer.stop()
         self.manager.shutdown()
         logger.info("Shutdown complete")

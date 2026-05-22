@@ -106,7 +106,14 @@ class AdaptiveBatchedLoop(BatchedLoop):
                 except Empty:
                     continue
 
-        return payloads, timed_out_uids
+        # Zero-copy: restore payloads that were offloaded to shared memory
+        converted: list[tuple[Any, Any, Any]] = []
+        for response_queue_id, uid, x_enc in payloads:
+            if isinstance(x_enc, tuple) and len(x_enc) == 2 and x_enc[0] in ("direct", "shm"):
+                from light_server.core.shm_buffer import ShmPayloadBuffer
+                x_enc = ShmPayloadBuffer.retrieve(x_enc[0], x_enc[1])
+            converted.append((response_queue_id, uid, x_enc))
+        return converted, timed_out_uids
 
     def _send_start(self, transport: MessageTransport, response_queue_id: Any, uid: Any, lit_api: LitAPI) -> None:
         if not self._restart_workers:

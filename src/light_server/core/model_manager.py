@@ -16,6 +16,7 @@ from light_server.config import ModelConfig
 from light_server.core.ensemble import EnsembleParser
 from light_server.core.loader import load_litapi_from_file
 from light_server.core.registry import ModelRegistry
+from light_server.core.shm_buffer import ShmPayloadBuffer
 from litserve import LitAPI
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,8 @@ class ModelManager:
         # Atomic uid counters: one per model+version to avoid global lock contention
         self._uid_counters: dict[str, itertools.count] = {}
         self._uid_lock = threading.Lock()
+        # Shared memory buffer for zero-copy transport of large payloads
+        self._shm_buffer = ShmPayloadBuffer(threshold_bytes=4096)
 
     def _scan_plain_models(self, models: list[dict[str, Any]]) -> None:
         """Scan plain model subdirectories."""
@@ -387,7 +390,15 @@ class ModelManager:
             seq = next(self._uid_counters[key])
         # Use hyphen separator to avoid ambiguity when model names contain underscores
         uid = f"{key}-{seq}-{time.monotonic_ns() & 0xFFFFFFFF:08x}"
-        queue.put((response_queue_id, uid, time.monotonic(), payload))
+        # Zero-copy: only wrap payload for batched models (AdaptiveBatchedLoop
+        # knows how to unwrap).  SingleLoop models pass payload directly.
+        entry = self.registry.get(name, version)
+        max_batch_size = (entry.get("config") or {}).get("max_batch_size", 1) if entry else 1
+        if max_batch_size > 1:
+            mode, data = self._shm_buffer.offload(payload)
+            queue.put((response_queue_id, uid, time.monotonic(), (mode, data)))
+        else:
+            queue.put((response_queue_id, uid, time.monotonic(), payload))
         return uid
 
     def activate(self, name: str, version: str) -> bool:
@@ -405,6 +416,10 @@ class ModelManager:
             with open(config_path, "r", encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
         return {}
+
+    def shutdown(self) -> None:
+        """Release all shared memory and other resources."""
+        self._shm_buffer.shutdown()
 
     def _enforce_max_versions(self, name: str) -> None:
         """Unload oldest versions if max_loaded_versions is exceeded."""

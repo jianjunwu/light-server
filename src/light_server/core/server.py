@@ -259,6 +259,9 @@ class LightServer:
                 if worker.is_alive():
                     worker.join(timeout=2)
 
+        # Release shared memory buffers before shutting down other services
+        self.model_manager.shutdown()
+
         if self._grpc_server:
             self._grpc_server.stop(5)
         if self._metrics_server:

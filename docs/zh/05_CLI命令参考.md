@@ -1,4 +1,4 @@
-[English](../en/05_cli_reference.md) | 简体中文
+[English](../en/05_CLI命令参考.md) | 简体中文
 
 # CLI 命令参考
 
@@ -197,5 +197,5 @@ light-server unpack artifact.lma --to ./model_repo
 
 ## 下一步
 
-- [运维指南](06_operations.md)
-- [FAQ](08_faq.md)
+- [运维指南](06_运维指南.md)
+- [FAQ](08_常见问题.md)

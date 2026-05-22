@@ -1,4 +1,4 @@
-[简体中文](../zh/08_faq.md) | English
+[简体中文](../zh/08_常见问题.md) | English
 
 # FAQ
 

@@ -1,4 +1,4 @@
-[简体中文](../zh/05_cli_reference.md) | English
+[简体中文](../zh/05_CLI命令参考.md) | English
 
 # CLI Reference
 

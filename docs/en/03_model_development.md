@@ -1,6 +1,28 @@
-[简体中文](../zh/03_model_development.md) | English
+[简体中文](../zh/03_模型开发指南.md) | English
 
 # Model Development Guide
+
+## Project Scaffolding (Recommended)
+
+Use `light-server init` to quickly generate a project:
+
+```bash
+light-server init my_project --template llm --model-name my_llm
+```
+
+### Template Reference
+
+| Template | Use Case | Contents |
+|----------|----------|----------|
+| `empty` | General purpose, start from scratch | Empty LitAPI skeleton |
+| `llm` | Large language model serving | decode_request parses OpenAI-style requests |
+| `cv-classify` | Image classification | Receives base64 image, outputs class label |
+| `cv-detect` | Object detection | Receives base64 image, outputs bounding boxes |
+| `nlp` | NLP text processing | Text classification / sentiment analysis skeleton |
+
+The scaffold also generates `Dockerfile`, `docker-compose.yml`, `Makefile`, and GitHub Actions CI config, ready to use.
+
+---
 
 ## Model Repository Convention
 

@@ -26,7 +26,17 @@ Requires Python >= 3.10.
 
 ## Quick Start
 
-### 1. Create a model repository
+### Option 1: Project Scaffolding (Recommended)
+
+```bash
+light-server init my_project
+```
+
+Follow the wizard to choose a template. Project code, Dockerfile, and CI config are generated automatically.
+
+### Option 2: Manual
+
+#### 1. Create a model repository
 
 ```bash
 mkdir -p model_repo/test_model/1
@@ -184,7 +194,8 @@ See the [`examples/`](examples/) directory for runnable examples:
 |---------|-------------|
 | [`01_quickstart`](examples/01_quickstart/) | Minimal model — serve, infer, admin APIs |
 | [`02_advanced`](examples/02_advanced/) | Batching + custom metrics + hot reload + versioning |
-| [`03_ensemble`](examples/03_ensemble/) | Multi-model pipeline — preprocess + predict |
+| [`03_ensemble`](examples/03_ensemble/) | Multi-model pipeline — preprocess + predict + Python client |
+| [`05_docker`](examples/05_docker/) | Docker containerized deployment — Dockerfile + docker-compose |
 
 ## License
 

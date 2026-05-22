@@ -28,7 +28,17 @@ pip install light-server
 
 ## 快速开始
 
-### 1. 创建模型仓库
+### 方式一：项目脚手架（推荐）
+
+```bash
+light-server init my_project
+```
+
+跟随向导选择模板，自动生成模型代码、Dockerfile、CI 配置。
+
+### 方式二：手动创建
+
+#### 1. 创建模型仓库
 
 ```bash
 mkdir -p model_repo/test_model/1
@@ -171,7 +181,7 @@ model_repo/
 - `logging`：日志模式、格式、输出路径、轮转策略
 - `webui`：内置 Web 界面设置
 
-完整配置字段说明见 [配置详解](docs/zh/02_configuration.md)。
+完整配置字段说明见 [配置详解](docs/zh/02_配置详解.md)。
 
 ## 文档
 
@@ -179,14 +189,14 @@ model_repo/
 
 | 文档 | 内容 |
 |------|------|
-| [快速开始](docs/zh/01_getting_started.md) | 安装 + 3 分钟上手 |
-| [配置详解](docs/zh/02_configuration.md) | 完整配置字段说明 + 优先级规则 |
-| [模型开发指南](docs/zh/03_model_development.md) | LitAPI 生命周期 + 批处理/流式/指标/版本控制 |
-| [API 参考](docs/zh/04_api_reference.md) | HTTP/gRPC 端点 + 状态码 |
-| [CLI 命令参考](docs/zh/05_cli_reference.md) | 6 个子命令完整参数 |
-| [运维指南](docs/zh/06_operations.md) | Prometheus + 日志 + 制品打包 + 分析器 + WebUI |
-| [架构设计](docs/zh/07_architecture.md) | 进程模型 + 请求链路 + Mermaid 图 |
-| [FAQ](docs/zh/08_faq.md) | 常见问题与性能调优 |
+| [快速开始](docs/zh/01_快速开始.md) | 安装 + 3 分钟上手 |
+| [配置详解](docs/zh/02_配置详解.md) | 完整配置字段说明 + 优先级规则 |
+| [模型开发指南](docs/zh/03_模型开发指南.md) | LitAPI 生命周期 + 批处理/流式/指标/版本控制 |
+| [API 参考](docs/zh/04_API参考.md) | HTTP/gRPC 端点 + 状态码 |
+| [CLI 命令参考](docs/zh/05_CLI命令参考.md) | 6 个子命令完整参数 |
+| [运维指南](docs/zh/06_运维指南.md) | Prometheus + 日志 + 制品打包 + 分析器 + WebUI |
+| [架构设计](docs/zh/07_架构设计.md) | 进程模型 + 请求链路 + Mermaid 图 |
+| [FAQ](docs/zh/08_常见问题.md) | 常见问题与性能调优 |
 
 英文文档见 [`docs/en/`](docs/en/)。
 
@@ -198,7 +208,8 @@ model_repo/
 |------|------|
 | [`01_quickstart`](examples/01_quickstart/) | 最简模型 — 启动、推理、管理 API |
 | [`02_advanced`](examples/02_advanced/) | 进阶特性 — 批处理 + 自定义指标 + 热重载 + 版本管理 |
-| [`03_ensemble`](examples/03_ensemble/) | 多模型流水线 — 预处理 + 推理 |
+| [`03_ensemble`](examples/03_ensemble/) | 多模型流水线 — 预处理 + 推理 + Python 客户端 |
+| [`05_docker`](examples/05_docker/) | Docker 容器化部署 — Dockerfile + docker-compose |
 
 ## 许可证
 

@@ -1,4 +1,4 @@
-[English](../en/04_api_reference.md) | 简体中文
+[English](../en/04_API参考.md) | 简体中文
 
 # API 参考
 
@@ -166,5 +166,5 @@ message PredictResponse {
 
 ## 下一步
 
-- [CLI 命令参考](05_cli_reference.md)
-- [运维指南](06_operations.md)
+- [CLI 命令参考](05_CLI命令参考.md)
+- [运维指南](06_运维指南.md)

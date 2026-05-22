@@ -1,4 +1,4 @@
-[简体中文](../zh/02_configuration.md) | English
+[简体中文](../zh/02_配置详解.md) | English
 
 # Configuration Guide
 

@@ -1,4 +1,4 @@
-[简体中文](../zh/07_architecture.md) | English
+[简体中文](../zh/07_架构设计.md) | English
 
 # Architecture
 

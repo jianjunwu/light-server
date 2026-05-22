@@ -1,4 +1,4 @@
-[简体中文](../zh/06_operations.md) | English
+[简体中文](../zh/06_运维指南.md) | English
 
 # Operations Guide
 
@@ -171,15 +171,39 @@ webui:
 
 ### Access
 
-Open browser at `http://{host}:{http_port}/`.
+Open browser at `http://{host}:{http_port}/`, default `http://127.0.0.1:8000/`.
 
-### Features
+### Features and Operations
 
-- View loaded models and their status
-- Real-time Prometheus metric charts
-- Model load/unload operations
-- Inference request test interface
-- Analyzer report viewer
+**Model Management**
+- Home page shows all loaded models with name, version, and readiness status
+- Click a model card to view details (API path, batching config, accelerator)
+- Use "Load" / "Unload" buttons to dynamically manage models without restarting
+
+**Inference Testing**
+- Select a model and enter a JSON payload in the test panel
+- Click "Send Request" to see the response result and request latency in real time
+- Copy the generated curl command for terminal reproduction
+
+**Metrics Monitoring**
+- Automatically pulls Prometheus data from `:metrics_port/metrics`
+- Visualizes request latency distribution, throughput trends, and active request counts
+- Filter by model dimension to quickly locate performance bottlenecks
+
+**Analyzer Reports**
+- If `light-server analyze` has been run, reports are automatically displayed in WebUI
+- View the Pareto frontier configuration list and apply recommended parameters with one click
+
+### Security
+
+In production, place WebUI and admin APIs behind a reverse proxy (e.g., Nginx) with authentication:
+
+```nginx
+location / {
+    auth_basic "Light Server Admin";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+    proxy_pass http://127.0.0.1:8000;
+}
 
 ---
 

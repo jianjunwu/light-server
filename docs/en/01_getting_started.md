@@ -1,4 +1,4 @@
-[简体中文](../zh/01_getting_started.md) | English
+[简体中文](../zh/01_快速开始.md) | English
 
 # Getting Started
 
@@ -10,7 +10,38 @@ pip install light-server
 
 Requires Python >= 3.10.
 
-## Run Your First Model in 3 Minutes
+## Recommended: Project Scaffolding (1 minute)
+
+```bash
+light-server init my_project
+```
+
+Follow the interactive wizard to choose a template (empty / llm / cv-classify / cv-detect / nlp). A complete project structure is generated automatically:
+
+```
+my_project/
+  server.yaml              # Server configuration
+  Dockerfile               # Container image
+  docker-compose.yml       # Local orchestration
+  Makefile                 # Common commands
+  test_request.py          # Quick test script
+  model_repo/
+    my_model/
+      1/
+        model.py           # LitAPI implementation
+        config.yaml        # Model config
+```
+
+Enter the project and start:
+
+```bash
+cd my_project
+light-server serve --config server.yaml
+```
+
+---
+
+## Manual: Run Your First Model in 3 Minutes
 
 ### 1. Create a Model Repository
 

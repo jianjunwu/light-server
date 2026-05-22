@@ -6,7 +6,25 @@ build-backend = "hatchling.build"
 name = "light-server"
 version = "0.1.0"
 description = "Triton-style CLI and deployment server built on LitServe"
+readme = "README.md"
+license = "MIT"
+authors = [
+    {name = "Nicholas Wu", email = "nicholaswu9527@gmail.com"},
+]
 requires-python = ">=3.10"
+keywords = ["litserve", "triton", "inference", "serving", "machine-learning", "mlops"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "litserve>=0.2.0",
     "pyyaml>=6.0",
@@ -14,6 +32,11 @@ dependencies = [
     "prometheus-client>=0.15.0",
     "cryptography>=41.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/jianjunwu/light-server"
+Repository = "https://github.com/jianjunwu/light-server"
+Issues = "https://github.com/jianjunwu/light-server/issues"
 
 [project.scripts]
 light-server = "light_server.__main__:main"

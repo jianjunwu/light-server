@@ -20,7 +20,7 @@ from light_server.config import Config, ModelConfig
 from light_server.core.model_manager import ModelManager
 from light_server.core.registry import ModelRegistry
 from light_server.observability import setup_multiproc_metrics, SystemMetrics
-from litserve.transport.factory import TransportConfig, create_transport_from_config
+from litserve.transport.process_transport import MPQueueTransport
 from litserve.utils import ResponseBufferItem
 
 logger = logging.getLogger(__name__)
@@ -31,16 +31,12 @@ class LightServer:
 
     def __init__(self, config: Config):
         self.config = config
-        self.manager = mp.Manager()
-        self.registry = ModelRegistry(self.manager)
+        self.registry = ModelRegistry()
 
-        # Shared transport for all models
-        transport_config = TransportConfig(
-            transport_type="mp",
-            num_consumers=1,
-        )
-        transport_config.manager = self.manager
-        self.transport = create_transport_from_config(transport_config)
+        # Shared transport using native multiprocessing.Queue (no Manager IPC)
+        num_consumers = 1
+        transport_queues = [mp.Queue() for _ in range(num_consumers)]
+        self.transport = MPQueueTransport(None, transport_queues)
 
         # Metrics: setup prometheus multiprocess mode before any metric creation
         self._metrics_registry, self._metrics_dir = setup_multiproc_metrics()
@@ -76,7 +72,7 @@ class LightServer:
         if not log_cfg.info_output and not log_cfg.error_output:
             return
 
-        self._log_queue = self.manager.Queue()
+        self._log_queue = mp.Queue()
 
         from light_server.logging.consumer import LogConsumer
         from light_server.logging.queue_handler import MPQueueHandler
@@ -276,5 +272,4 @@ class LightServer:
                 shutil.rmtree(self._metrics_dir)
             except OSError as e:
                 logger.warning(f"Failed to clean up metrics dir {self._metrics_dir}: {e}")
-        self.manager.shutdown()
         logger.info("Shutdown complete")

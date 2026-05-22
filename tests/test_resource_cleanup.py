@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import multiprocessing as mp
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -97,7 +98,7 @@ class TestTeardownHook:
 
         manager._workers["test_model_1"] = [mock_worker]
         manager._litapi_instances["test_model_1"] = mock_api
-        manager._workers_setup_status["test_model_1"] = registry._manager.dict()
+        manager._workers_setup_status["test_model_1"] = mp.Manager().dict()
 
         result = manager.unload("test_model", "1")
         assert result is True
@@ -121,7 +122,7 @@ class TestTeardownHook:
 
         manager._workers["test_model_1"] = [mock_worker]
         manager._litapi_instances["test_model_1"] = mock_api
-        manager._workers_setup_status["test_model_1"] = registry._manager.dict()
+        manager._workers_setup_status["test_model_1"] = mp.Manager().dict()
 
         result = manager.unload("test_model", "1")
         assert result is True
@@ -146,7 +147,7 @@ class TestArtifactCacheCleanup:
 
         manager._workers["test_model_1"] = [mock_worker]
         manager._litapi_instances["test_model_1"] = MagicMock()
-        manager._workers_setup_status["test_model_1"] = registry._manager.dict()
+        manager._workers_setup_status["test_model_1"] = mp.Manager().dict()
 
         with patch("light_server.artifact.cache.ArtifactCache.purge") as mock_purge:
             result = manager.unload("test_model", "1")
@@ -171,7 +172,7 @@ class TestArtifactCacheCleanup:
 
         manager._workers["test_model_1"] = [mock_worker]
         manager._litapi_instances["test_model_1"] = MagicMock()
-        manager._workers_setup_status["test_model_1"] = registry._manager.dict()
+        manager._workers_setup_status["test_model_1"] = mp.Manager().dict()
 
         with patch("light_server.artifact.cache.ArtifactCache.purge") as mock_purge:
             result = manager.unload("test_model", "1")
@@ -197,7 +198,7 @@ class TestQueueCleanupOnUnload:
 
         manager._workers["test_model_1"] = [mock_worker]
         manager._litapi_instances["test_model_1"] = MagicMock()
-        manager._workers_setup_status["test_model_1"] = registry._manager.dict()
+        manager._workers_setup_status["test_model_1"] = mp.Manager().dict()
 
         # Monkeypatch get_queue to return a mock with close/join_thread
         mock_queue = MagicMock()
@@ -227,7 +228,7 @@ class TestQueueCleanupOnUnload:
         manager._litapi_instances["test_model_1"] = MagicMock()
 
         # Simulate manager.dict() with per-worker sub-keys
-        setup_dict = registry._manager.dict()
+        setup_dict = mp.Manager().dict()
         setup_dict["test_model_1_0"] = "ready"
         setup_dict["test_model_1_1"] = "ready"
         manager._workers_setup_status["test_model_1"] = setup_dict
@@ -255,7 +256,7 @@ class TestQueueCleanupOnUnload:
 
         manager._workers["test_model_1"] = [mock_worker]
         manager._litapi_instances["test_model_1"] = MagicMock()
-        manager._workers_setup_status["test_model_1"] = registry._manager.dict()
+        manager._workers_setup_status["test_model_1"] = mp.Manager().dict()
 
         result = manager.unload("test_model", "1")
         assert result is True

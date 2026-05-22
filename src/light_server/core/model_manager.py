@@ -42,6 +42,8 @@ class ModelManager:
         self._workers_setup_status: dict[str, Any] = {}
         # model_name -> actual model directory path (for .lma artifacts extracted to cache)
         self._artifact_model_paths: dict[str, Path] = {}
+        # Small manager only for worker setup status (low-frequency, tiny data)
+        self._setup_manager = mp.Manager()
 
     def _scan_plain_models(self, models: list[dict[str, Any]]) -> None:
         """Scan plain model subdirectories."""
@@ -215,7 +217,7 @@ class ModelManager:
             lit_api.config = model_config
             lit_api.pre_setup()
 
-            request_queue = self.registry._manager.Queue()
+            request_queue = mp.Queue()
             self.registry.set_queue(name, version, request_queue)
 
             workers = self._launch_workers(
@@ -450,7 +452,7 @@ class ModelManager:
 
         total_workers = len(device_list) * workers_per_device
         key = self._worker_key(name, version)
-        workers_setup_status = self.registry._manager.dict()
+        workers_setup_status = self._setup_manager.dict()
         self._workers_setup_status[key] = workers_setup_status
 
         for worker_id in range(total_workers):

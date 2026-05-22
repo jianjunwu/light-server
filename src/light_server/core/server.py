@@ -256,11 +256,25 @@ class LightServer:
         # Unload all loaded models by iterating through the registry
         for entry in self.registry.list_loaded():
             self.model_manager.unload(entry["name"], entry["version"])
+
+        # Wait for all worker processes to fully exit before shutting down manager
+        for workers in self.model_manager._workers.values():
+            for worker in workers:
+                if worker.is_alive():
+                    worker.join(timeout=2)
+
         if self._grpc_server:
             self._grpc_server.stop(5)
         if self._metrics_server:
             self._metrics_server.shutdown()
         if self._log_consumer:
             self._log_consumer.stop()
+        # Clean up prometheus multiprocess temp directory
+        if self._metrics_dir and os.path.isdir(self._metrics_dir):
+            import shutil
+            try:
+                shutil.rmtree(self._metrics_dir)
+            except OSError as e:
+                logger.warning(f"Failed to clean up metrics dir {self._metrics_dir}: {e}")
         self.manager.shutdown()
         logger.info("Shutdown complete")

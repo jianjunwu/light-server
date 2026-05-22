@@ -123,6 +123,9 @@ async def _do_litapi_infer(
     except asyncio.TimeoutError:
         server.response_buffer.pop(uid, None)
         raise HTTPException(status_code=504, detail="Inference timeout")
+    except asyncio.CancelledError:
+        server.response_buffer.pop(uid, None)
+        raise
     except HTTPException:
         raise
     except Exception as e:

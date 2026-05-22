@@ -280,6 +280,15 @@ class ModelManager:
         self.registry.set_status(name, version, "UNLOADING")
 
         if not is_ensemble:
+            # Close the request queue to release pipe file descriptors
+            queue = self.registry.get_queue(name, version)
+            if queue is not None:
+                try:
+                    queue.close()
+                    queue.join_thread()
+                except Exception as e:
+                    logger.warning(f"Error closing queue for {name} v{version}: {e}")
+
             for worker in self._workers.get(key, []):
                 try:
                     worker.terminate()
@@ -290,8 +299,25 @@ class ModelManager:
                     logger.error(f"Error terminating worker for {name} v{version}: {e}")
 
             self._workers.pop(key, None)
-            self._litapi_instances.pop(key, None)
-            self._workers_setup_status.pop(key, None)
+
+            # Invoke teardown hook on the LitAPI instance for framework-specific cleanup
+            lit_api = self._litapi_instances.pop(key, None)
+            if lit_api is not None:
+                try:
+                    lit_api.teardown()
+                except Exception as e:
+                    logger.warning(f"teardown hook failed for {name} v{version}: {e}")
+
+            # Clean up per-worker status entries in the manager.dict()
+            setup_status = self._workers_setup_status.pop(key, None)
+            if setup_status is not None:
+                prefix = f"{key}_"
+                for k in list(setup_status.keys()):
+                    if k.startswith(prefix):
+                        try:
+                            del setup_status[k]
+                        except KeyError:
+                            pass
 
         self.registry.remove(name, version)
 
@@ -307,6 +333,17 @@ class ModelManager:
         if self.system_metrics:
             self.system_metrics.record_model_unload(name, version)
             self.system_metrics.set_active_workers(name, version, 0)
+
+        # Purge artifact cache if this model came from an artifact and no versions remain loaded
+        if name in self._artifact_model_paths:
+            remaining = self.registry.list_versions(name)
+            if not remaining:
+                try:
+                    from light_server.artifact.cache import ArtifactCache
+                    ArtifactCache().purge(name)
+                    self._artifact_model_paths.pop(name, None)
+                except Exception as e:
+                    logger.warning(f"Failed to purge artifact cache for {name}: {e}")
 
         logger.info(f"Model {name} version {version} unloaded")
         return True

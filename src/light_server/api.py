@@ -75,3 +75,26 @@ class LitAPI(ls.LitAPI):
             (which is to re-import changed .py modules).
         """
         return None
+
+    def teardown(self) -> None:
+        """Called when the model is unloaded.
+
+        Override this method to release framework-specific resources
+        (e.g., GPU memory, file handles, external connections).
+
+        Example for PyTorch::
+
+            def teardown(self):
+                import gc
+                import torch
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+        Example for TensorFlow::
+
+            def teardown(self):
+                import tensorflow as tf
+                tf.keras.backend.clear_session()
+        """
+        pass

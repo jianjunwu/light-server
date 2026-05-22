@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Report {{ report.meta.id }} - Light Server{% endblock %}
+{% block content %}
+<h1>Benchmark Report</h1>
+
+<div class="metric-grid" style="margin-bottom:1.5rem;">
+  <div class="metric-card">
+    <div class="value">{{ report.result.throughput }}</div>
+    <div class="label">Throughput (req/s)</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">{{ report.result.total_requests }}</div>
+    <div class="label">Total Requests</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">{{ report.result.successful_requests }}</div>
+    <div class="label">Success</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">{{ report.result.failed_requests }}</div>
+    <div class="label">Failed</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">{{ report.result.duration_seconds }}s</div>
+    <div class="label">Duration</div>
+  </div>
+</div>
+
+<h2>Latency Distribution</h2>
+<div class="bar-chart">
+  {% set latencies = [
+    ('P50', report.result.latency_ms.p50),
+    ('P90', report.result.latency_ms.p90),
+    ('P99', report.result.latency_ms.p99),
+    ('P99.9', report.result.latency_ms.p99_9),
+    ('Mean', report.result.latency_ms.mean),
+  ] %}
+  {% set max_lat = [report.result.latency_ms.p50, report.result.latency_ms.p90, report.result.latency_ms.p99, report.result.latency_ms.p99_9, report.result.latency_ms.mean] | max %}
+  {% if max_lat == 0 %}{% set max_lat = 1 %}{% endif %}
+  {% for label, val in latencies %}
+  <div class="bar-row">
+    <span class="bar-label">{{ label }}</span>
+    <div class="bar-track">
+      <div class="bar-fill" style="width: {{ (val / max_lat * 100) | int }}%"></div>
+    </div>
+    <span class="bar-value">{{ val }} ms</span>
+  </div>
+  {% endfor %}
+</div>
+
+<h2>Details</h2>
+<table class="compact-table">
+  <tr><td>Model</td><td>{{ report.meta.model }}</td></tr>
+  <tr><td>Version</td><td>{{ report.meta.version }}</td></tr>
+  <tr><td>Mode</td><td>{{ report.meta.mode }}</td></tr>
+  <tr><td>Concurrency</td><td>{{ report.meta.concurrency }}</td></tr>
+  <tr><td>Duration</td><td>{{ report.meta.duration }} s</td></tr>
+  <tr><td>Min Latency</td><td>{{ report.result.latency_ms.min }} ms</td></tr>
+  <tr><td>Max Latency</td><td>{{ report.result.latency_ms.max }} ms</td></tr>
+</table>
+
+{% if report.result.errors %}
+<h2>Sample Errors</h2>
+<ul>
+  {% for err in report.result.errors %}
+  <li><code>{{ err }}</code></li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<p><a href="/ui/benchmarks">&larr; Back to Benchmarks</a></p>
+{% endblock %}

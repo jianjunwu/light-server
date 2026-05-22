@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ model_name }} - Light Server{% endblock %}
+{% block content %}
+<h1>{{ model_name }}</h1>
+
+<h2>Versions</h2>
+<table class="compact-table">
+  <thead>
+    <tr>
+      <th>Version</th>
+      <th>Status</th>
+      <th>Type</th>
+      <th>Workers</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for v in versions %}
+    <tr>
+      <td>{{ v.version }}</td>
+      <td><span class="badge badge-{{ v.status | lower }}">{{ v.status }}</span></td>
+      <td>{{ v.model_type or 'litapi' }}</td>
+      <td>{{ v.workers or 0 }}</td>
+      <td>
+        <div class="actions" style="gap:0.3rem;">
+          {% if v.status != 'READY' %}
+          <form method="post" action="/ui/api/models/{{ model_name }}/load?version={{ v.version }}"
+                hx-post="/ui/api/models/{{ model_name }}/load?version={{ v.version }}"
+                hx-target="body" hx-swap="outerHTML">
+            <button type="submit" style="font-size:0.8em;padding:0.25em 0.6em;">Load</button>
+          </form>
+          {% else %}
+          <form method="post" action="/ui/api/models/{{ model_name }}/unload?version={{ v.version }}"
+                hx-post="/ui/api/models/{{ model_name }}/unload?version={{ v.version }}"
+                hx-target="body" hx-swap="outerHTML">
+            <button type="submit" class="secondary" style="font-size:0.8em;padding:0.25em 0.6em;">Unload</button>
+          </form>
+          {% endif %}
+          {% if v.status == 'READY' and active_version != v.version %}
+          <form method="post" action="/ui/api/models/{{ model_name }}/versions/{{ v.version }}/activate"
+                hx-post="/ui/api/models/{{ model_name }}/versions/{{ v.version }}/activate"
+                hx-target="body" hx-swap="outerHTML">
+            <button type="submit" class="contrast" style="font-size:0.8em;padding:0.25em 0.6em;">Activate</button>
+          </form>
+          {% endif %}
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Real-time Metrics</h2>
+<div id="metrics-panel"
+     hx-get="/ui/api/metrics/{{ model_name }}/{{ active_version or '1' }}"
+     hx-trigger="load, every 3s"
+     hx-target="#metrics-panel"
+     hx-swap="innerHTML">
+  <div class="metric-grid">
+    <div class="metric-card">
+      <div class="value">{{ metrics.qps or 0 }}</div>
+      <div class="label">QPS</div>
+    </div>
+    <div class="metric-card">
+      <div class="value">{{ metrics.p50_ms or 0 }}ms</div>
+      <div class="label">P50</div>
+    </div>
+    <div class="metric-card">
+      <div class="value">{{ metrics.p90_ms or 0 }}ms</div>
+      <div class="label">P90</div>
+    </div>
+    <div class="metric-card">
+      <div class="value">{{ metrics.p99_ms or 0 }}ms</div>
+      <div class="label">P99</div>
+    </div>
+    <div class="metric-card">
+      <div class="value">{{ metrics.queue_depth or 0 }}</div>
+      <div class="label">Queue</div>
+    </div>
+    <div class="metric-card">
+      <div class="value">{{ metrics.active_workers or 0 }}</div>
+      <div class="label">Workers</div>
+    </div>
+  </div>
+  {% if metrics.sparkline_svg %}
+  <div style="margin-top:0.5rem;">
+    <small style="color:var(--pico-muted-color);">QPS Trend</small>
+    {{ metrics.sparkline_svg | safe }}
+  </div>
+  {% endif %}
+</div>
+
+<p><a href="/ui/">&larr; Back to Dashboard</a></p>
+{% endblock %}

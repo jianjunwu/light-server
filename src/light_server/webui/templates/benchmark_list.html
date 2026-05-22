@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Benchmarks - Light Server{% endblock %}
+{% block content %}
+<h1>Benchmarks</h1>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+  <h2 style="margin:0;">History</h2>
+  <a href="/ui/benchmarks/new" role="button">New Benchmark</a>
+</div>
+
+<table class="compact-table">
+  <thead>
+    <tr>
+      <th>Time</th>
+      <th>Model</th>
+      <th>Version</th>
+      <th>Mode</th>
+      <th>Concurrency</th>
+      <th>Throughput</th>
+      <th>P99</th>
+      <th>Errors</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in reports %}
+    <tr>
+      <td>{{ r.meta.created_at[:19] }}</td>
+      <td>{{ r.meta.model }}</td>
+      <td>{{ r.meta.version }}</td>
+      <td>{{ r.meta.mode }}</td>
+      <td>{{ r.meta.concurrency }}</td>
+      <td>{{ r.result.throughput }} req/s</td>
+      <td>{{ r.result.latency_ms.p99 }} ms</td>
+      <td>{{ r.result.failed_requests }}</td>
+      <td>
+        <a href="/ui/benchmarks/{{ r.meta.id }}" style="font-size:0.85em;">View</a>
+      </td>
+    </tr>
+    {% else %}
+    <tr>
+      <td colspan="9" style="text-align:center;color:var(--pico-muted-color);">No reports yet.</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

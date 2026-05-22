@@ -35,4 +35,9 @@ def create_app(server: LightServer) -> FastAPI:
     from light_server.http.handlers import create_inference_routes
     create_inference_routes(app, server)
 
+    # Web UI routes (only if enabled)
+    if server.config.webui.enabled:
+        from light_server.webui.routes import create_ui_routes
+        create_ui_routes(app, server)
+
     return app

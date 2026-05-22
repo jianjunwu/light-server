@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Config - Light Server{% endblock %}
+{% block content %}
+<h1>Configuration</h1>
+
+{% if error %}
+<article style="background:#fee2e2;color:#991b1b;padding:0.75rem 1rem;border-radius:var(--pico-border-radius);margin-bottom:1rem;">
+  {{ error }}
+</article>
+{% endif %}
+{% if saved %}
+<article style="background:#dcfce7;color:#166534;padding:0.75rem 1rem;border-radius:var(--pico-border-radius);margin-bottom:1rem;">
+  Configuration saved. Restart the server to apply changes.
+</article>
+{% endif %}
+
+<form method="post" action="/ui/api/config">
+  <div class="form-section">
+    <h3>Server</h3>
+    <div class="grid">
+      <label>HTTP Port<input type="number" name="http_port" value="{{ cfg.server.http_port }}" min="1" max="65535"></label>
+      <label>gRPC Port<input type="number" name="grpc_port" value="{{ cfg.server.grpc_port }}" min="1" max="65535"></label>
+      <label>Metrics Port<input type="number" name="metrics_port" value="{{ cfg.server.metrics_port }}" min="1" max="65535"></label>
+      <label>Host<input type="text" name="host" value="{{ cfg.server.host }}"></label>
+      <label>Accelerator<input type="text" name="accelerator" value="{{ cfg.server.accelerator }}"></label>
+      <label>Devices<input type="text" name="devices" value="{{ cfg.server.devices }}"></label>
+      <label>Workers/Device<input type="number" name="workers_per_device" value="{{ cfg.server.workers_per_device }}" min="1"></label>
+      <label>Timeout<input type="number" name="timeout" value="{{ cfg.server.timeout }}" step="0.1" min="0.1"></label>
+      <label>Log Level
+        <select name="log_level">
+          <option value="debug" {% if cfg.server.log_level == 'debug' %}selected{% endif %}>debug</option>
+          <option value="info" {% if cfg.server.log_level == 'info' %}selected{% endif %}>info</option>
+          <option value="warning" {% if cfg.server.log_level == 'warning' %}selected{% endif %}>warning</option>
+          <option value="error" {% if cfg.server.log_level == 'error' %}selected{% endif %}>error</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <h3>gRPC</h3>
+    <label><input type="checkbox" name="grpc_enabled" {% if cfg.grpc.enabled %}checked{% endif %}> Enabled</label>
+    <label>Max Workers<input type="number" name="grpc_max_workers" value="{{ cfg.grpc.max_workers }}" min="1"></label>
+  </div>
+
+  <div class="form-section">
+    <h3>Metrics</h3>
+    <label><input type="checkbox" name="metrics_enabled" {% if cfg.metrics.enabled %}checked{% endif %}> Enabled</label>
+  </div>
+
+  <div class="form-section">
+    <h3>Logging</h3>
+    <div class="grid">
+      <label>Format
+        <select name="log_format">
+          <option value="json" {% if cfg.logging.format == 'json' %}selected{% endif %}>json</option>
+          <option value="text" {% if cfg.logging.format == 'text' %}selected{% endif %}>text</option>
+        </select>
+      </label>
+      <label>Rotate By
+        <select name="log_rotate_by">
+          <option value="none" {% if cfg.logging.rotate_by == 'none' %}selected{% endif %}>none</option>
+          <option value="size" {% if cfg.logging.rotate_by == 'size' %}selected{% endif %}>size</option>
+          <option value="time" {% if cfg.logging.rotate_by == 'time' %}selected{% endif %}>time</option>
+        </select>
+      </label>
+      <label>Max Size (MB)<input type="number" name="log_max_size" value="{{ cfg.logging.max_size }}" min="1"></label>
+      <label>When<input type="text" name="log_when" value="{{ cfg.logging.when }}"></label>
+      <label>Backup Count<input type="number" name="log_backup_count" value="{{ cfg.logging.backup_count }}" min="0"></label>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <h3>Model Repository</h3>
+    <label>Path<input type="text" name="repo_path" value="{{ cfg.model_repository.path }}"></label>
+    <label>Control Mode
+      <select name="control_mode">
+        <option value="explicit" {% if cfg.model_repository.control_mode == 'explicit' %}selected{% endif %}>explicit</option>
+        <option value="poll" {% if cfg.model_repository.control_mode == 'poll' %}selected{% endif %}>poll</option>
+        <option value="none" {% if cfg.model_repository.control_mode == 'none' %}selected{% endif %}>none</option>
+      </select>
+    </label>
+    <label>Poll Interval (s)<input type="number" name="poll_interval" value="{{ cfg.model_repository.poll_interval }}" min="1"></label>
+  </div>
+
+  <div class="form-section">
+    <h3>Auto-Load Models</h3>
+    <div class="tag-list" id="load-models-list">
+      {% for m in cfg.load_models %}
+      <span class="tag-item">{{ m }} <button type="button" onclick="this.parentElement.remove()">&times;</button></span>
+      {% endfor %}
+    </div>
+    <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+      <input type="text" id="new-model-name" placeholder="model_name">
+      <button type="button" onclick="addModel()">Add</button>
+    </div>
+    <template id="tag-template">
+      <span class="tag-item"><span class="tag-text"></span> <button type="button" onclick="this.parentElement.remove()">&times;</button></span>
+    </template>
+    <script>
+      function addModel() {
+        const input = document.getElementById('new-model-name');
+        const name = input.value.trim();
+        if (!name) return;
+        const tpl = document.getElementById('tag-template');
+        const clone = tpl.content.cloneNode(true);
+        clone.querySelector('.tag-text').textContent = name;
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'load_models';
+        hidden.value = name;
+        clone.querySelector('.tag-item').appendChild(hidden);
+        document.getElementById('load-models-list').appendChild(clone);
+        input.value = '';
+      }
+      // Ensure hidden inputs exist for all tags on submit
+      document.querySelector('form').addEventListener('submit', function() {
+        document.querySelectorAll('#load-models-list .tag-item').forEach(function(el) {
+          if (!el.querySelector('input[type="hidden"]')) {
+            const name = el.querySelector('.tag-text').textContent;
+            const hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = 'load_models';
+            hidden.value = name;
+            el.appendChild(hidden);
+          }
+        });
+      });
+    </script>
+  </div>
+
+  <div class="form-section">
+    <h3>Web UI</h3>
+    <label><input type="checkbox" name="webui_enabled" {% if cfg.webui.enabled %}checked{% endif %}> Enabled</label>
+    <label>Report Retention (days)<input type="number" name="report_retention_days" value="{{ cfg.webui.report_retention_days }}" min="1"></label>
+  </div>
+
+  <button type="submit">Save Configuration</button>
+</form>
+{% endblock %}

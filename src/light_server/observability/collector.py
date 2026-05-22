@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections import deque
 from typing import Any
 
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
@@ -64,6 +65,12 @@ class SystemMetrics:
         )
         self._request_start_times: dict[str, float] = {}
 
+        # UI-friendly sliding window data (not Prometheus metrics)
+        self._latency_window: deque[tuple[float, float]] = deque(maxlen=2000)
+        self._request_counts: dict[str, int] = {}
+        self._last_rate_check: float = time.time()
+        self._qps_history: dict[str, deque[tuple[float, float]]] = {}
+
     def record_request_start(self, model: str, version: str) -> None:
         """Call at request entry."""
         self._request_start_times[f"{model}_{version}"] = time.time()
@@ -73,9 +80,12 @@ class SystemMetrics:
         self.requests_total.labels(model=model, version=version, status=status).inc()
         start = self._request_start_times.pop(f"{model}_{version}", None)
         if start is not None:
-            self.request_duration.labels(model=model, version=version).observe(
-                time.time() - start
-            )
+            latency = time.time() - start
+            self.request_duration.labels(model=model, version=version).observe(latency)
+            self._latency_window.append((time.time(), latency))
+
+        key = f"{model}_{version}"
+        self._request_counts[key] = self._request_counts.get(key, 0) + 1
 
     def inc_queue_depth(self, model: str, version: str) -> None:
         self.queue_depth.labels(model=model, version=version).inc()
@@ -106,3 +116,29 @@ class SystemMetrics:
 
     def set_active_workers(self, model: str, version: str, count: int) -> None:
         self.active_workers.labels(model=model, version=version).set(count)
+
+    # ------------------------------------------------------------------
+    # UI query helpers (sliding window data)
+    # ------------------------------------------------------------------
+
+    def get_latency_samples(self, window_seconds: float = 60.0) -> list[float]:
+        """Return latency samples within the last N seconds."""
+        cutoff = time.time() - window_seconds
+        return [lat for ts, lat in self._latency_window if ts >= cutoff]
+
+    def get_request_count(self, model: str, version: str) -> int:
+        """Return total request count for a model version."""
+        return self._request_counts.get(f"{model}_{version}", 0)
+
+    def record_qps_snapshot(self, model: str, version: str, qps: float) -> None:
+        """Record a QPS snapshot for sparkline history."""
+        key = f"{model}_{version}"
+        if key not in self._qps_history:
+            self._qps_history[key] = deque(maxlen=20)
+        self._qps_history[key].append((time.time(), qps))
+
+    def get_qps_history(self, model: str, version: str) -> list[tuple[float, float]]:
+        """Return QPS history for sparkline (list of (timestamp, qps))."""
+        key = f"{model}_{version}"
+        hist = self._qps_history.get(key, deque())
+        return list(hist)

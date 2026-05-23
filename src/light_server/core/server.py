@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from light_server.config import Config, ModelConfig
 from light_server.core.model_manager import ModelManager
 from light_server.core.registry import ModelRegistry
+from light_server.core.response_buffer import TTLResponseBuffer
 from light_server.observability import setup_multiproc_metrics, SystemMetrics
 from litserve.transport.process_transport import MPQueueTransport
 from litserve.utils import ResponseBufferItem
@@ -55,7 +56,11 @@ class LightServer:
         )
 
         self._shutdown_event = threading.Event()
-        self.response_buffer: dict[str, ResponseBufferItem] = {}
+        buffer_ttl = self.config.server.timeout + 30.0
+        self.response_buffer = TTLResponseBuffer(
+            ttl_seconds=buffer_ttl,
+            max_size=100_000,
+        )
         self._response_task: asyncio.Task | None = None
 
         # Build HTTP app
@@ -101,6 +106,8 @@ class LightServer:
         """Start all services."""
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
+
+        self.response_buffer.start()
 
         self._load_initial_models()
 
@@ -249,6 +256,7 @@ class LightServer:
 
     def shutdown(self) -> None:
         logger.info("Shutting down LightServer...")
+        self.response_buffer.stop()
         # Unload all loaded models by iterating through the registry
         for entry in self.registry.list_loaded():
             self.model_manager.unload(entry["name"], entry["version"])

@@ -221,3 +221,6 @@ __marimo__/
 .vscode/
 .claude/
 CLAUDE.md
+
+# Model repository (populated at runtime, examples live elsewhere)
+model_repo/

@@ -1,5 +1,0 @@
-name: stream_model
-api_path: /predict
-max_batch_size: 1
-accelerator: cpu
-bidirectional: true

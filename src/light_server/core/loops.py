@@ -1,20 +1,26 @@
-"""Custom LitServe loops with adaptive batching for better performance."""
+"""Custom LitServe loops with adaptive batching and bidirectional streaming."""
 
 from __future__ import annotations
 
+import logging
+import threading
 import time
 from queue import Empty, Queue
 from typing import Any, Optional
 
 from litserve import LitAPI
+from litserve.callbacks import CallbackRunner, EventTypes
 from litserve.loops.base import (
     _SENTINEL_VALUE,
     _StopLoopError,
     DefaultLoop,
+    _inject_context,
 )
 from litserve.loops.simple_loops import BatchedLoop
 from litserve.transport.base import MessageTransport
 from litserve.utils import LitAPIStatus, LoopResponseType
+
+logger = logging.getLogger(__name__)
 
 
 class AdaptiveBatchedLoop(BatchedLoop):
@@ -126,3 +132,262 @@ class AdaptiveBatchedLoop(BatchedLoop):
             status=LitAPIStatus.START,
             response_type=LoopResponseType.STREAMING if lit_api.stream else LoopResponseType.REGULAR,
         )
+
+
+class StreamSession:
+    """Manages a single bidirectional stream in a worker process."""
+
+    def __init__(
+        self,
+        stream_id: str,
+        lit_api: LitAPI,
+        transport: MessageTransport,
+        response_queue_id: int,
+        loop_instance: "BidirectionalStreamingLoop",
+    ) -> None:
+        self.stream_id = stream_id
+        self.lit_api = lit_api
+        self.transport = transport
+        self.response_queue_id = response_queue_id
+        self.loop_instance = loop_instance
+        self.input_queue: Queue = Queue()
+        self.closed = False
+        self.thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self.thread = threading.Thread(target=self._run, daemon=True, name=f"stream-session-{self.stream_id}")
+        self.thread.start()
+
+    def push_chunk(self, chunk: dict[str, Any]) -> None:
+        self.input_queue.put(chunk)
+
+    def close(self) -> None:
+        self.closed = True
+        self.input_queue.put(None)  # EOF marker
+
+    def cancel(self) -> None:
+        self.closed = True
+        # Drain remaining chunks to unblock the generator
+        while not self.input_queue.empty():
+            try:
+                self.input_queue.get_nowait()
+            except Empty:
+                break
+        self.input_queue.put(None)
+
+    def _run(self) -> None:
+        try:
+            def input_gen():
+                while True:
+                    chunk = self.input_queue.get()
+                    if chunk is None:
+                        break
+                    yield chunk
+
+            # Prefer stream_predict if the model implements it
+            if hasattr(self.lit_api, "stream_predict") and callable(getattr(self.lit_api, "stream_predict")):
+                output_gen = self.lit_api.stream_predict(input_gen())
+            else:
+                output_gen = self._fallback_predict(input_gen())
+
+            for output in output_gen:
+                y_enc = self.lit_api.encode_response(output)
+                y_enc = self.lit_api.format_encoded_response(y_enc)
+                self.loop_instance.put_response(
+                    self.transport,
+                    self.response_queue_id,
+                    self.stream_id,
+                    y_enc,
+                    LitAPIStatus.OK,
+                    LoopResponseType.STREAMING,
+                )
+
+            if not self.closed:
+                self.loop_instance.put_response(
+                    self.transport,
+                    self.response_queue_id,
+                    self.stream_id,
+                    "",
+                    LitAPIStatus.FINISH_STREAMING,
+                    LoopResponseType.STREAMING,
+                )
+        except Exception as e:
+            logger.exception(f"StreamSession {self.stream_id} error: {e}")
+            self.loop_instance.put_error_response(
+                self.transport,
+                self.response_queue_id,
+                self.stream_id,
+                e,
+                LoopResponseType.STREAMING,
+            )
+
+    def _fallback_predict(self, input_gen):
+        for chunk in input_gen:
+            yield self.lit_api.predict(chunk)
+
+
+class BidirectionalStreamingLoop(DefaultLoop):
+    """Worker loop that supports bidirectional streaming input + output.
+
+    - Regular requests (no _stream_meta) are processed as one-shot streaming
+      responses (same as StreamingLoop).
+    - Stream messages (_stream_meta present) are routed to StreamSessions
+      that run in background threads, enabling concurrent stream handling.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sessions: dict[str, StreamSession] = {}
+        self._session_lock = threading.Lock()
+
+    def __call__(
+        self,
+        lit_api: LitAPI,
+        device: str,
+        worker_id: int,
+        request_queue: Queue,
+        transport: MessageTransport,
+        workers_setup_status: dict[int, str],
+        callback_runner: CallbackRunner,
+    ) -> None:
+        self.run_bidirectional_loop(lit_api, request_queue, transport, callback_runner)
+
+    def run_bidirectional_loop(
+        self,
+        lit_api: LitAPI,
+        request_queue: Queue,
+        transport: MessageTransport,
+        callback_runner: CallbackRunner,
+    ) -> None:
+        while True:
+            try:
+                request_data = request_queue.get(timeout=1.0)
+                if request_data == _SENTINEL_VALUE:
+                    return
+
+                response_queue_id, uid, timestamp, payload = request_data
+
+                # Detect bidirectional stream messages
+                if isinstance(payload, dict) and "_stream_meta" in payload:
+                    self._handle_stream_message(
+                        payload, response_queue_id, uid, lit_api, transport, callback_runner
+                    )
+                    continue
+
+                # Regular one-shot streaming request
+                self._process_request(
+                    response_queue_id, uid, timestamp, payload, lit_api, transport, callback_runner
+                )
+
+            except (Empty, ValueError):
+                continue
+            except KeyboardInterrupt:
+                self.kill()
+                return
+
+    def _handle_stream_message(
+        self,
+        payload: dict[str, Any],
+        response_queue_id: int,
+        uid: str,
+        lit_api: LitAPI,
+        transport: MessageTransport,
+        callback_runner: CallbackRunner,
+    ) -> None:
+        meta = payload["_stream_meta"]
+        msg_type = meta["msg_type"]
+        stream_id = meta["stream_id"]
+        data = {k: v for k, v in payload.items() if k != "_stream_meta"}
+
+        if msg_type == "STREAM_OPEN":
+            with self._session_lock:
+                if stream_id in self.sessions:
+                    return
+                session = StreamSession(
+                    stream_id, lit_api, transport, response_queue_id, self
+                )
+                self.sessions[stream_id] = session
+            session.start()
+            if self._restart_workers:
+                self.put_response(
+                    transport, response_queue_id, stream_id, (),
+                    LitAPIStatus.START, LoopResponseType.STREAMING,
+                )
+
+        elif msg_type == "STREAM_CHUNK":
+            with self._session_lock:
+                session = self.sessions.get(stream_id)
+            if session:
+                session.push_chunk(data)
+
+        elif msg_type == "STREAM_CLOSE":
+            with self._session_lock:
+                session = self.sessions.pop(stream_id, None)
+            if session:
+                session.close()
+
+        elif msg_type == "STREAM_CANCEL":
+            with self._session_lock:
+                session = self.sessions.pop(stream_id, None)
+            if session:
+                session.cancel()
+
+    def _process_request(
+        self,
+        response_queue_id: int,
+        uid: str,
+        timestamp: float,
+        payload: dict[str, Any],
+        lit_api: LitAPI,
+        transport: MessageTransport,
+        callback_runner: CallbackRunner,
+    ) -> None:
+        if self._restart_workers:
+            self.put_response(
+                transport, response_queue_id, uid, (),
+                LitAPIStatus.START, LoopResponseType.STREAMING,
+            )
+
+        if (lit_api.request_timeout and lit_api.request_timeout != -1) and (
+            time.monotonic() - timestamp > lit_api.request_timeout
+        ):
+            from fastapi import HTTPException
+            self.put_response(
+                transport, response_queue_id, uid,
+                HTTPException(504, "Request timed out"),
+                LitAPIStatus.ERROR, LoopResponseType.STREAMING,
+            )
+            return
+
+        try:
+            context = {}
+            callback_runner.trigger_event(EventTypes.BEFORE_DECODE_REQUEST.value, lit_api=lit_api)
+            x = _inject_context(context, lit_api.decode_request, payload)
+            callback_runner.trigger_event(EventTypes.AFTER_DECODE_REQUEST.value, lit_api=lit_api)
+
+            callback_runner.trigger_event(EventTypes.BEFORE_PREDICT.value, lit_api=lit_api)
+            y_gen = _inject_context(context, lit_api.predict, x)
+            callback_runner.trigger_event(EventTypes.AFTER_PREDICT.value, lit_api=lit_api)
+
+            callback_runner.trigger_event(EventTypes.BEFORE_ENCODE_RESPONSE.value, lit_api=lit_api)
+            y_enc_gen = _inject_context(context, lit_api.encode_response, y_gen)
+
+            for y_enc in y_enc_gen:
+                y_enc = lit_api.format_encoded_response(y_enc)
+                self.put_response(
+                    transport, response_queue_id, uid, y_enc,
+                    LitAPIStatus.OK, LoopResponseType.STREAMING,
+                )
+
+            self.put_response(
+                transport, response_queue_id, uid, "",
+                LitAPIStatus.FINISH_STREAMING, LoopResponseType.STREAMING,
+            )
+
+            callback_runner.trigger_event(EventTypes.AFTER_ENCODE_RESPONSE.value, lit_api=lit_api)
+
+        except Exception as e:
+            logger.exception(f"BidirectionalStreamingLoop request error uid={uid}: {e}")
+            self.put_error_response(
+                transport, response_queue_id, uid, e, LoopResponseType.STREAMING,
+            )

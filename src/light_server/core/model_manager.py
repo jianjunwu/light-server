@@ -227,12 +227,19 @@ class ModelManager:
 
             LitAPIClass = load_litapi_from_file(model_py, suppress_prometheus=True)
             max_batch_size = model_config.get("max_batch_size", 1)
+            if model_config.get("bidirectional", False):
+                from light_server.core.loops import BidirectionalStreamingLoop
+                loop = BidirectionalStreamingLoop()
+            elif max_batch_size > 1:
+                loop = AdaptiveBatchedLoop()
+            else:
+                loop = "auto"
             lit_api = LitAPIClass(
                 max_batch_size=max_batch_size,
                 batch_timeout=model_config.get("batch_timeout", 0.0),
                 api_path=model_config.get("api_path", "/predict"),
                 stream=model_config.get("stream", False),
-                loop=AdaptiveBatchedLoop() if max_batch_size > 1 else "auto",
+                loop=loop,
             )
             lit_api.config = model_config
             lit_api.pre_setup()
@@ -782,12 +789,19 @@ def _inference_worker_wrapper(
         # Reconstruct LitAPI in child process
         LitAPIClass = load_litapi_from_file(Path(model_py_path))
         max_batch_size = config.get("max_batch_size", 1)
+        if config.get("bidirectional", False):
+            from light_server.core.loops import BidirectionalStreamingLoop
+            loop = BidirectionalStreamingLoop()
+        elif max_batch_size > 1:
+            loop = AdaptiveBatchedLoop()
+        else:
+            loop = "auto"
         lit_api = LitAPIClass(
             max_batch_size=max_batch_size,
             batch_timeout=config.get("batch_timeout", 0.0),
             api_path=config.get("api_path", "/predict"),
             stream=config.get("stream", False),
-            loop=AdaptiveBatchedLoop() if max_batch_size > 1 else "auto",
+            loop=loop,
         )
         lit_api.config = config
         lit_api.pre_setup()

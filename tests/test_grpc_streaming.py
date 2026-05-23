@@ -4,15 +4,15 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _start_server_with_grpc():
     """Start light-server with gRPC enabled and return (proc, temp_config_path, base_url, grpc_target)."""
-    env = os.environ.copy()
-    env["PYTHONPATH"] = "/Users/nic/workspace/projects/light_server/src"
-
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write("""
 grpc:
@@ -40,8 +40,7 @@ server:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        cwd="/Users/nic/workspace/projects/light_server",
-        env=env,
+        cwd=str(PROJECT_ROOT),
     )
 
     base = "http://127.0.0.1:18000"
@@ -207,11 +206,7 @@ def test_grpc_model_control():
 
 def test_grpc_bidirectional_stream():
     """E2E test: start server with gRPC enabled, connect via BidirectionalStream."""
-    env = os.environ.copy()
-    env["PYTHONPATH"] = "/Users/nic/workspace/projects/light_server/src"
-
     # Use a temporary config with gRPC enabled
-    import tempfile
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write("""
 grpc:
@@ -239,8 +234,7 @@ server:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        cwd="/Users/nic/workspace/projects/light_server",
-        env=env,
+        cwd=str(PROJECT_ROOT),
     )
 
     try:

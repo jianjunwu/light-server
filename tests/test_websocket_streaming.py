@@ -1,25 +1,23 @@
 import asyncio
 import json
-import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_websocket_bidirectional_stream():
     """E2E test: start server with stream_model, connect via WebSocket, send chunks, receive echoes."""
-    env = os.environ.copy()
-    env["PYTHONPATH"] = "/Users/nic/workspace/projects/light_server/src"
-
     proc = subprocess.Popen(
         [sys.executable, "-m", "light_server", "serve", "--config", "server.yaml"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        cwd="/Users/nic/workspace/projects/light_server",
-        env=env,
+        cwd=str(PROJECT_ROOT),
     )
 
     try:
@@ -105,16 +103,12 @@ def test_websocket_bidirectional_stream():
 
 def test_websocket_unloaded_model():
     """E2E test: WebSocket to an unloaded model should be rejected gracefully."""
-    env = os.environ.copy()
-    env["PYTHONPATH"] = "/Users/nic/workspace/projects/light_server/src"
-
     proc = subprocess.Popen(
         [sys.executable, "-m", "light_server", "serve", "--config", "server.yaml"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        cwd="/Users/nic/workspace/projects/light_server",
-        env=env,
+        cwd=str(PROJECT_ROOT),
     )
 
     try:

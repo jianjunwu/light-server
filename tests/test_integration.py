@@ -1,25 +1,23 @@
 import json
-import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 import requests
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 def test_server_startup_and_inference():
     """E2E test: start server, call inference, call admin APIs, shutdown."""
-    env = os.environ.copy()
-    env["PYTHONPATH"] = "/Users/nic/workspace/projects/light_server/src"
-
     proc = subprocess.Popen(
         [sys.executable, "-m", "light_server", "serve", "--config", "server.yaml"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        cwd="/Users/nic/workspace/projects/light_server",
-        env=env,
+        cwd=str(PROJECT_ROOT),
     )
 
     try:

@@ -30,7 +30,18 @@ class QueueFullError(Exception):
 
 
 class ModelManager:
-    """Manages loading/unloading of models and their inference workers."""
+    """Manages loading/unloading of models and their inference workers.
+
+    Each model version gets its own set of worker processes.  The manager
+    coordinates with :class:`ModelRegistry` to track state, and with
+    :class:`SystemMetrics` to emit load/unload metrics.
+
+    Key responsibilities:
+    - Scan the model repository (plain dirs + ``.lma`` artifacts)
+    - Load/unload model versions with multiprocessing workers
+    - Route inference requests to worker queues
+    - Manage bidirectional stream routing and worker load balancing
+    """
 
     def __init__(
         self,
@@ -156,7 +167,20 @@ class ModelManager:
         return target
 
     def load(self, name: str, version: str = "1", config_override: ModelConfig | None = None) -> bool:
-        """Load a model version from the repository."""
+        """Load a model version from the repository.
+
+        Spins up inference worker processes (or parses an ensemble DAG)
+        and registers the model in :class:`ModelRegistry`.
+
+        Args:
+            name: Model name (must match a directory in the repo).
+            version: Version string, defaults to ``"1"``.
+            config_override: Optional :class:`ModelConfig` to override
+                values read from ``config.yaml``.
+
+        Returns:
+            ``True`` if the model was loaded successfully.
+        """
         try:
             validate_model_name(name)
             validate_version(version)
@@ -502,7 +526,26 @@ class ModelManager:
         return min(loads, key=loads.get)
 
     def infer(self, name: str, payload: dict[str, Any], version: str | None = None, response_queue_id: int = 0) -> str:
-        """Submit an inference request for a model. Returns request uid."""
+        """Submit an inference request for a model.
+
+        The request is placed on a per-worker queue.  The caller should
+        await the corresponding uid in the shared response buffer.
+
+        Args:
+            name: Model name.
+            payload: JSON-decoded request payload.
+            version: Specific version to target.  If ``None``, the
+                currently active version is used.
+            response_queue_id: Transport consumer id for routing the
+                response back to the handler.
+
+        Returns:
+            A unique request uid.
+
+        Raises:
+            RuntimeError: If the model/version is not ready or has no queues.
+            QueueFullError: If the worker queue is at capacity.
+        """
         validate_model_name(name)
         if version is not None:
             validate_version(version)
@@ -681,7 +724,18 @@ class ModelManager:
             logger.warning(f"Queue full dropping STREAM_CANCEL for {name} v{version}")
 
     def activate(self, name: str, version: str) -> bool:
-        """Activate a specific version for default routing."""
+        """Activate a specific version for default routing.
+
+        After activation, inference requests that do not specify a version
+        will be routed to this version.
+
+        Args:
+            name: Model name.
+            version: Version to activate.
+
+        Returns:
+            ``True`` if the version was activated (i.e. it exists and is ready).
+        """
         try:
             validate_model_name(name)
             validate_version(version)

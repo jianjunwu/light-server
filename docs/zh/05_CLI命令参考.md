@@ -16,6 +16,7 @@ light-server [command] [options]
 | `analyze` | 运行模型分析器，寻找最优配置 |
 | `pack` | 将模型目录打包为 `.lma` 制品 |
 | `unpack` | 解包 `.lma` 制品 |
+| `init` | 初始化新项目脚手架 |
 
 ---
 
@@ -192,6 +193,43 @@ light-server unpack artifact.lma --to ./model_repo
 | `--to` | str | `.` | 解压目标目录 |
 | `--verify-key` | str | — | Ed25519 公钥 PEM 路径 |
 | `--dry-run` | flag | — | 仅校验，不解压 |
+
+---
+
+## init
+
+初始化新项目脚手架。支持交互式向导和非交互式两种模式。
+
+### 交互式模式
+
+```bash
+light-server init
+```
+
+跟随向导选择模板、配置 gRPC / 指标 / WebUI 等选项，自动生成模型代码、配置文件和 Dockerfile。
+
+### 非交互式模式
+
+```bash
+light-server init my_project --template llm --model-name my_llm
+```
+
+### 参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `project_name` | str | — | 项目目录名（不指定则进入交互模式） |
+| `--template, -t` | str | `empty` | 模板：`empty` / `llm` / `cv-classify` / `cv-detect` / `nlp` |
+| `--model-name, -m` | str | `my_model` | 模型名称 |
+| `--grpc` | flag | 启用 | 启用 gRPC |
+| `--no-grpc` | flag | — | 禁用 gRPC |
+| `--metrics` | flag | 启用 | 启用指标 |
+| `--no-metrics` | flag | — | 禁用指标 |
+| `--webui` | flag | 启用 | 启用 Web UI |
+| `--no-webui` | flag | — | 禁用 Web UI |
+| `--batch` | flag | — | 启用动态批处理 |
+| `--stream` | flag | — | 启用流式响应 |
+| `--output-dir, -o` | str | `.` | 项目输出目录 |
 
 ---
 

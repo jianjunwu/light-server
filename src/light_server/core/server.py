@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import multiprocessing as mp
+import os
 import signal
 import sys
 import threading
@@ -28,7 +29,27 @@ logger = logging.getLogger(__name__)
 
 
 class LightServer:
-    """Orchestrates HTTP, gRPC, metrics, and model lifecycle."""
+    """Orchestrates HTTP, gRPC, metrics, and model lifecycle.
+
+    This is the top-level controller that wires together all subsystems:
+    - HTTP server (FastAPI + uvicorn, workers=1)
+    - Optional gRPC server
+    - Optional Prometheus metrics server
+    - Model registry and model manager for load/unload/infer
+    - Shared response buffer for async worker-to-handler communication
+
+    Typical usage::
+
+        from light_server import Config, LightServer
+
+        config = Config()
+        server = LightServer(config)
+        server.run()   # blocks until SIGINT/SIGTERM
+
+    Args:
+        config: Server configuration including ports, model repository,
+            logging, and gRPC/metrics settings.
+    """
 
     def __init__(self, config: Config):
         self.config = config
@@ -103,7 +124,13 @@ class LightServer:
         root.addHandler(queue_handler)
 
     def run(self) -> None:
-        """Start all services."""
+        """Start all services and block until shutdown.
+
+        This method registers signal handlers, loads initial models,
+        starts gRPC / metrics servers (if enabled), begins repository
+        polling (if configured), and finally starts the HTTP server.
+        It does not return until the process receives SIGINT or SIGTERM.
+        """
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
@@ -255,6 +282,13 @@ class LightServer:
         sys.exit(0)
 
     def shutdown(self) -> None:
+        """Gracefully shut down all services.
+
+        Stops the response buffer, unloads all models (terminating workers),
+        shuts down gRPC / metrics / logging servers, and cleans up temporary
+        Prometheus multiproc directories. This is called automatically on
+        SIGINT/SIGTERM, or can be invoked programmatically.
+        """
         logger.info("Shutting down LightServer...")
         self.response_buffer.stop()
         # Unload all loaded models by iterating through the registry

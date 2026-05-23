@@ -1,14 +1,46 @@
-[English](../en/04_API参考.md) | 简体中文
+[English](../en/04_api_reference.md) | 简体中文
 
 # API 参考
 
 ## HTTP REST 端点
 
+### 服务健康与信息
+
+#### GET `/health`
+
+健康检查端点。
+
+**响应：**
+
+```
+ok
+```
+
+**状态码：**
+
+| 状态码 | 含义 |
+|--------|------|
+| 200 | 服务正常运行 |
+
+#### GET `/info`
+
+获取服务基本信息。
+
+**响应：**
+
+```json
+{
+  "server": "light-server",
+  "version": "0.1.0",
+  "loaded_models": [...]
+}
+```
+
 ### 推理端点
 
 #### POST `/v2/models/{model_name}/infer`
 
-执行模型推理。
+对模型的**当前激活版本**执行推理。
 
 **请求头：**
 
@@ -27,7 +59,7 @@ Content-Type: application/json
 **响应：**
 
 ```json
-{"output": "hello"}
+{"result": "hello"}
 ```
 
 **状态码：**
@@ -35,14 +67,41 @@ Content-Type: application/json
 | 状态码 | 含义 |
 |--------|------|
 | 200 | 推理成功 |
+| 400 | 模型名或版本号格式无效 |
 | 404 | 模型不存在或未加载 |
-| 422 | 请求格式错误 |
+| 429 | 服务忙，请求队列已满 |
 | 500 | 推理过程中出错 |
-| 503 | 服务忙，请求队列已满 |
+| 504 | 推理超时 |
 
-#### POST `/v2/models/{model_name}/infer`（流式）
+#### POST `/v2/models/{model_name}/versions/{version}/infer`
 
-当模型配置 `stream: true` 时，响应为 `text/event-stream`。
+对模型的**指定版本**执行推理。
+
+参数与响应同上，路径中的 `version` 为具体版本号（如 `1`、`2`）。
+
+#### WebSocket `/v2/models/{model_name}/stream`
+
+对模型的**当前激活版本**建立双向 WebSocket 流式推理连接。
+
+客户端通过 WebSocket 发送 JSON 消息，服务端逐 chunk 返回推理结果。
+
+**消息格式（客户端 -> 服务端）：**
+
+```json
+{"input": "hello"}
+```
+
+**消息格式（服务端 -> 客户端）：**
+
+```json
+{"token": "he"}
+```
+
+流结束时服务端自动关闭连接。
+
+#### WebSocket `/v2/models/{model_name}/versions/{version}/stream`
+
+对模型的**指定版本**建立 WebSocket 流式推理连接。
 
 ### 管理端点
 
@@ -53,68 +112,143 @@ Content-Type: application/json
 **响应：**
 
 ```json
-[
-  {
-    "name": "echo_model",
-    "version": "1",
-    "ready": true,
-    "api_path": "/predict"
-  }
-]
+{
+  "models": [
+    {
+      "name": "echo_model",
+      "version": "1",
+      "status": "READY",
+      "model_type": "litapi",
+      "config": {...}
+    }
+  ]
+}
 ```
 
 #### GET `/v2/models/{model_name}/ready`
 
 检查模型就绪状态。
 
+**查询参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `version` | str | 否 | 指定版本号，不指定则检查激活版本 |
+
 **响应：**
 
 ```json
-{"ready": true}
+{
+  "name": "echo_model",
+  "version": "1",
+  "ready": true,
+  "active_version": "1"
+}
+```
+
+#### GET `/v2/models/{model_name}/versions`
+
+列出模型所有**已加载**的版本。
+
+**响应：**
+
+```json
+{
+  "name": "echo_model",
+  "active_version": "1",
+  "versions": [
+    {
+      "name": "echo_model",
+      "version": "1",
+      "status": "READY",
+      "model_type": "litapi"
+    }
+  ]
+}
 ```
 
 #### POST `/v2/repository/index`
 
-列出仓库中所有可用模型（未加载的也会列出）。
+列出仓库中所有可用模型（包括未加载的）。
 
 **响应：**
 
 ```json
-[
-  {
-    "name": "echo_model",
-    "versions": ["1", "2"]
-  }
-]
+{
+  "models": [
+    {
+      "name": "echo_model",
+      "versions": ["1", "2"]
+    }
+  ]
+}
 ```
 
 #### POST `/v2/repository/models/{model_name}/load`
 
-加载模型。
+从仓库加载模型的指定版本。
 
-**请求体（可选）：**
+**查询参数：**
 
-```json
-{"version": "2"}
-```
-
-不指定 `version` 时加载默认版本（`1`）。
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `version` | str | 否 | `1` | 要加载的版本号 |
 
 **响应：**
 
 ```json
-{"status": "loaded", "name": "echo_model", "version": "2"}
+{
+  "success": true,
+  "message": "Model echo_model version 2 loaded"
+}
 ```
+
+**状态码：**
+
+| 状态码 | 含义 |
+|--------|------|
+| 200 | 加载成功 |
+| 400 | 模型名或版本号格式无效，或加载失败 |
 
 #### POST `/v2/repository/models/{model_name}/unload`
 
-卸载模型。
+卸载模型。若指定版本，则仅卸载该版本。
+
+**查询参数：**
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `version` | str | 否 | `null` | 要卸载的版本号，不指定则卸载所有版本 |
 
 **响应：**
 
 ```json
-{"status": "unloaded", "name": "echo_model"}
+{
+  "success": true,
+  "message": "Model echo_model version 1 unloaded"
+}
 ```
+
+#### POST `/v2/models/{model_name}/versions/{version}/activate`
+
+将指定版本设为**激活版本**（后续无版本号的推理请求将路由到该版本）。
+
+**响应：**
+
+```json
+{
+  "success": true,
+  "message": "Model echo_model version 2 is now active",
+  "active_version": "2"
+}
+```
+
+**状态码：**
+
+| 状态码 | 含义 |
+|--------|------|
+| 200 | 激活成功 |
+| 400 | 模型名或版本号格式无效，或该版本未就绪 |
 
 ### 指标端点
 
@@ -128,7 +262,7 @@ Prometheus 指标，包含：
 
 ### WebUI 端点
 
-#### GET `/`
+#### GET `/ui/`
 
 Web UI 首页（当 `webui.enabled: true` 时）。
 

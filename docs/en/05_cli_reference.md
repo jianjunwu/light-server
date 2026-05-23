@@ -16,6 +16,7 @@ light-server [command] [options]
 | `analyze` | Run Model Analyzer to find optimal configuration |
 | `pack` | Pack a model directory into a `.lma` artifact |
 | `unpack` | Unpack a `.lma` artifact |
+| `init` | Initialize a new project scaffold |
 
 ---
 
@@ -192,6 +193,43 @@ light-server unpack artifact.lma --to ./model_repo
 | `--to` | str | `.` | Target directory |
 | `--verify-key` | str | — | Path to Ed25519 public key PEM |
 | `--dry-run` | flag | — | Validate only, do not extract |
+
+---
+
+## init
+
+Initialize a new project scaffold. Supports both interactive wizard and non-interactive modes.
+
+### Interactive Mode
+
+```bash
+light-server init
+```
+
+Follow the wizard to select a template and configure gRPC / metrics / WebUI options. Automatically generates model code, config file, and Dockerfile.
+
+### Non-interactive Mode
+
+```bash
+light-server init my_project --template llm --model-name my_llm
+```
+
+### Arguments
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `project_name` | str | — | Project directory name (omit for interactive mode) |
+| `--template, -t` | str | `empty` | Template: `empty` / `llm` / `cv-classify` / `cv-detect` / `nlp` |
+| `--model-name, -m` | str | `my_model` | Model name |
+| `--grpc` | flag | enabled | Enable gRPC |
+| `--no-grpc` | flag | — | Disable gRPC |
+| `--metrics` | flag | enabled | Enable metrics |
+| `--no-metrics` | flag | — | Disable metrics |
+| `--webui` | flag | enabled | Enable Web UI |
+| `--no-webui` | flag | — | Disable Web UI |
+| `--batch` | flag | — | Enable dynamic batching |
+| `--stream` | flag | — | Enable streaming responses |
+| `--output-dir, -o` | str | `.` | Project output directory |
 
 ---
 

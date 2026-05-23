@@ -67,6 +67,8 @@ class ModelManager:
         # Round-robin counter for regular requests
         self._infer_counters: dict[str, int] = {}
         self._infer_counter_lock = threading.Lock()
+        # Global lock for model load/unload/activate to prevent race conditions
+        self._model_lock = threading.Lock()
 
     def _scan_plain_models(self, models: list[dict[str, Any]]) -> None:
         """Scan plain model subdirectories."""
@@ -163,49 +165,64 @@ class ModelManager:
             return False
 
         key = self._worker_key(name, version)
-        if key in self._workers:
-            logger.info(f"Model {name} version {version} is already loaded")
-            return True
+        with self._model_lock:
+            if key in self._workers:
+                logger.info(f"Model {name} version {version} is already loaded")
+                return True
+            # Placeholder to prevent concurrent threads from starting duplicate workers
+            self._workers[key] = []
 
-        model_dir = self._resolve_model_base(name) / version
-        if not model_dir.exists():
-            logger.error(f"Model directory not found: {model_dir}")
-            if self.system_metrics:
-                self.system_metrics.record_model_load(name, version, success=False)
-            return False
+        success = False
+        try:
+            model_dir = self._resolve_model_base(name) / version
+            if not model_dir.exists():
+                logger.error(f"Model directory not found: {model_dir}")
+                if self.system_metrics:
+                    self.system_metrics.record_model_load(name, version, success=False)
+                return False
 
-        model_py = model_dir / "model.py"
-        config_yaml = model_dir / "config.yaml"
+            model_py = model_dir / "model.py"
+            config_yaml = model_dir / "config.yaml"
 
-        # Detect ensemble: config.yaml contains 'ensemble' block
-        import yaml
-        is_ensemble = False
-        if config_yaml.exists():
-            try:
-                with open(config_yaml, "r", encoding="utf-8") as f:
-                    cfg = yaml.safe_load(f) or {}
-                is_ensemble = "ensemble" in cfg
-            except Exception:
-                pass
+            # Detect ensemble: config.yaml contains 'ensemble' block
+            import yaml
+            is_ensemble = False
+            if config_yaml.exists():
+                try:
+                    with open(config_yaml, "r", encoding="utf-8") as f:
+                        cfg = yaml.safe_load(f) or {}
+                    is_ensemble = "ensemble" in cfg
+                except Exception:
+                    pass
 
-        if not model_py.exists() and not is_ensemble:
-            logger.error(f"Neither model.py nor ensemble config found in {model_dir}")
-            if self.system_metrics:
-                self.system_metrics.record_model_load(name, version, success=False)
-            return False
+            if not model_py.exists() and not is_ensemble:
+                logger.error(f"Neither model.py nor ensemble config found in {model_dir}")
+                if self.system_metrics:
+                    self.system_metrics.record_model_load(name, version, success=False)
+                return False
 
-        model_config = self._load_model_config(config_yaml, config_override)
+            model_config = self._load_model_config(config_yaml, config_override)
 
-        if is_ensemble:
-            success = self._load_ensemble(name, version, model_config)
+            if is_ensemble:
+                with self._model_lock:
+                    if key in self._workers and self._workers[key]:
+                        logger.info(f"Model {name} version {version} is already loaded")
+                        return True
+                    success = self._load_ensemble(name, version, model_config)
+                if self.system_metrics:
+                    self.system_metrics.record_model_load(name, version, success=success)
+                return success
+
+            success = self._load_litapi(name, version, model_py, model_config)
             if self.system_metrics:
                 self.system_metrics.record_model_load(name, version, success=success)
             return success
-
-        success = self._load_litapi(name, version, model_py, model_config)
-        if self.system_metrics:
-            self.system_metrics.record_model_load(name, version, success=success)
-        return success
+        finally:
+            # If loading failed, remove the placeholder
+            if not success:
+                with self._model_lock:
+                    if key in self._workers and self._workers[key] == []:
+                        self._workers.pop(key, None)
 
     def _load_ensemble(self, name: str, version: str, model_config: dict[str, Any]) -> bool:
         """Load an ensemble model (no workers, just parse DAG)."""
@@ -285,33 +302,45 @@ class ModelManager:
                 name, version, str(model_py), model_config, worker_queues
             )
             key = self._worker_key(name, version)
-            self._workers[key] = workers
-            self._litapi_instances[key] = lit_api
+
+            with self._model_lock:
+                if key in self._workers and self._workers[key]:
+                    # Another thread already loaded this model
+                    for w in workers:
+                        w.terminate()
+                        w.join(timeout=2)
+                    logger.info(f"Model {name} version {version} loaded by another thread")
+                    return True
+                self._workers[key] = workers
+                self._litapi_instances[key] = lit_api
 
             self._wait_for_ready(key, workers)
-            self.registry.set_status(name, version, "READY")
 
-            model_cfg = self.get_model_config(name)
-            default_version = model_cfg.get("default_version")
-            current_active = self.registry.get_active_version(name)
-            if current_active is None:
-                if default_version is not None:
-                    if version == default_version:
+            with self._model_lock:
+                self.registry.set_status(name, version, "READY")
+
+                model_cfg = self.get_model_config(name)
+                default_version = model_cfg.get("default_version")
+                current_active = self.registry.get_active_version(name)
+                if current_active is None:
+                    if default_version is not None:
+                        if version == default_version:
+                            self.registry.activate_version(name, version)
+                    else:
                         self.registry.activate_version(name, version)
-                else:
-                    self.registry.activate_version(name, version)
 
-            self._enforce_max_versions(name)
+                self._enforce_max_versions(name)
 
-            if self.system_metrics:
-                self.system_metrics.set_active_workers(name, version, len(workers))
+                if self.system_metrics:
+                    self.system_metrics.set_active_workers(name, version, len(workers))
 
             logger.info(f"Model {name} version {version} loaded successfully")
             return True
 
         except Exception as e:
             logger.exception(f"Failed to load model {name} version {version}: {e}")
-            self.registry.set_status(name, version, "ERROR")
+            with self._model_lock:
+                self.registry.set_status(name, version, "ERROR")
             return False
 
     def unload(self, name: str, version: str | None = None) -> bool:
@@ -331,7 +360,8 @@ class ModelManager:
             return self._unload_version(name, version)
 
         unloaded_any = False
-        keys = [k for k in self._workers if k.startswith(f"{name}_")]
+        with self._model_lock:
+            keys = [k for k in self._workers if k.startswith(f"{name}_")]
         for key in keys:
             v = key[len(name) + 1:]
             if self._unload_version(name, v):
@@ -341,101 +371,108 @@ class ModelManager:
 
     def _unload_version(self, name: str, version: str) -> bool:
         key = self._worker_key(name, version)
-        entry = self.registry.get(name, version)
-        is_ensemble = entry is not None and entry.get("model_type") == "ensemble"
+        workers_to_stop: list[mp.Process] = []
+        lit_api: LitAPI | None = None
 
-        if key not in self._workers and not is_ensemble:
-            logger.warning(f"Model {name} version {version} is not loaded")
-            return False
+        with self._model_lock:
+            entry = self.registry.get(name, version)
+            is_ensemble = entry is not None and entry.get("model_type") == "ensemble"
 
-        self.registry.set_status(name, version, "UNLOADING")
+            if key not in self._workers and not is_ensemble:
+                logger.warning(f"Model {name} version {version} is not loaded")
+                return False
 
-        if not is_ensemble:
-            # Close all per-worker request queues
-            worker_queues = self.registry.get_worker_queues(name, version)
-            if worker_queues:
-                for q in worker_queues:
+            self.registry.set_status(name, version, "UNLOADING")
+
+            if not is_ensemble:
+                # Close all per-worker request queues
+                worker_queues = self.registry.get_worker_queues(name, version)
+                if worker_queues:
+                    for q in worker_queues:
+                        try:
+                            q.close()
+                            q.join_thread()
+                        except Exception as e:
+                            logger.warning(f"Error closing queue for {name} v{version}: {e}")
+                # Also close the legacy single queue if it wasn't in worker_queues
+                q_legacy = self.registry.get_queue(name, version)
+                if q_legacy is not None:
                     try:
-                        q.close()
-                        q.join_thread()
+                        q_legacy.close()
+                        q_legacy.join_thread()
                     except Exception as e:
                         logger.warning(f"Error closing queue for {name} v{version}: {e}")
-            # Also close the legacy single queue if it wasn't in worker_queues
-            queue = self.registry.get_queue(name, version)
-            if queue is not None:
-                try:
-                    queue.close()
-                    queue.join_thread()
-                except Exception as e:
-                    logger.warning(f"Error closing queue for {name} v{version}: {e}")
 
-            # Clean up stream routing and worker loads for this model
-            self._worker_loads.pop(key, None)
-            with self._stream_lock:
-                self._stream_routing = {
-                    sid: wid for sid, wid in self._stream_routing.items()
-                    if not sid.startswith(f"{key}-")
-                }
-            self._infer_counters.pop(key, None)
+                # Clean up stream routing and worker loads for this model
+                self._worker_loads.pop(key, None)
+                with self._stream_lock:
+                    self._stream_routing = {
+                        sid: wid for sid, wid in self._stream_routing.items()
+                        if not sid.startswith(f"{key}-")
+                    }
+                self._infer_counters.pop(key, None)
 
-            for worker in self._workers.get(key, []):
-                try:
-                    worker.terminate()
-                    worker.join(timeout=5)
-                    if worker.is_alive():
-                        worker.kill()
-                except Exception as e:
-                    logger.error(f"Error terminating worker for {name} v{version}: {e}")
+                # Pop workers (terminate outside the lock)
+                workers_to_stop = self._workers.pop(key, [])
 
-            self._workers.pop(key, None)
+                # Clean up atomic uid counter for this model version
+                self._uid_counters.pop(key, None)
 
-            # Clean up atomic uid counter for this model version
-            self._uid_counters.pop(key, None)
+                # Pop LitAPI instance (teardown outside the lock)
+                lit_api = self._litapi_instances.pop(key, None)
 
-            # Invoke teardown hook on the LitAPI instance for framework-specific cleanup
-            lit_api = self._litapi_instances.pop(key, None)
-            if lit_api is not None:
-                try:
-                    lit_api.teardown()
-                except Exception as e:
-                    logger.warning(f"teardown hook failed for {name} v{version}: {e}")
+                # Clean up per-worker status entries in the manager.dict()
+                setup_status = self._workers_setup_status.pop(key, None)
+                if setup_status is not None:
+                    prefix = f"{key}_"
+                    for k in list(setup_status.keys()):
+                        if k.startswith(prefix):
+                            try:
+                                del setup_status[k]
+                            except KeyError:
+                                pass
 
-            # Clean up per-worker status entries in the manager.dict()
-            setup_status = self._workers_setup_status.pop(key, None)
-            if setup_status is not None:
-                prefix = f"{key}_"
-                for k in list(setup_status.keys()):
-                    if k.startswith(prefix):
-                        try:
-                            del setup_status[k]
-                        except KeyError:
-                            pass
+            self.registry.remove(name, version)
 
-        self.registry.remove(name, version)
+            # If we just unloaded the active version, clear it
+            if self.registry.get_active_version(name) == version:
+                self.registry.deactivate(name)
+                # Try to auto-activate another ready version
+                for e in self.registry.list_versions(name):
+                    if e.get("status") == "READY":
+                        self.registry.activate_version(name, e["version"])
+                        break
 
-        # If we just unloaded the active version, clear it
-        if self.registry.get_active_version(name) == version:
-            self.registry.deactivate(name)
-            # Try to auto-activate another ready version
-            for e in self.registry.list_versions(name):
-                if e.get("status") == "READY":
-                    self.registry.activate_version(name, e["version"])
-                    break
+            if self.system_metrics:
+                self.system_metrics.record_model_unload(name, version)
+                self.system_metrics.set_active_workers(name, version, 0)
 
-        if self.system_metrics:
-            self.system_metrics.record_model_unload(name, version)
-            self.system_metrics.set_active_workers(name, version, 0)
+            # Purge artifact cache if this model came from an artifact and no versions remain loaded
+            if name in self._artifact_model_paths:
+                remaining = self.registry.list_versions(name)
+                if not remaining:
+                    try:
+                        from light_server.artifact.cache import ArtifactCache
+                        ArtifactCache().purge(name)
+                        self._artifact_model_paths.pop(name, None)
+                    except Exception as e:
+                        logger.warning(f"Failed to purge artifact cache for {name}: {e}")
 
-        # Purge artifact cache if this model came from an artifact and no versions remain loaded
-        if name in self._artifact_model_paths:
-            remaining = self.registry.list_versions(name)
-            if not remaining:
-                try:
-                    from light_server.artifact.cache import ArtifactCache
-                    ArtifactCache().purge(name)
-                    self._artifact_model_paths.pop(name, None)
-                except Exception as e:
-                    logger.warning(f"Failed to purge artifact cache for {name}: {e}")
+        # Lock released: terminate workers and teardown
+        for worker in workers_to_stop:
+            try:
+                worker.terminate()
+                worker.join(timeout=5)
+                if worker.is_alive():
+                    worker.kill()
+            except Exception as e:
+                logger.error(f"Error terminating worker for {name} v{version}: {e}")
+
+        if lit_api is not None:
+            try:
+                lit_api.teardown()
+            except Exception as e:
+                logger.warning(f"teardown hook failed for {name} v{version}: {e}")
 
         logger.info(f"Model {name} version {version} unloaded")
         return True
@@ -651,7 +688,8 @@ class ModelManager:
         except ValueError as exc:
             logger.warning(f"Invalid model name or version: {exc}")
             return False
-        success = self.registry.activate_version(name, version)
+        with self._model_lock:
+            success = self.registry.activate_version(name, version)
         if success and self.system_metrics:
             self.system_metrics.record_version_switch(name)
         return success

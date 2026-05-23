@@ -101,9 +101,13 @@ class TestHTTPQueueLimit:
         )
 
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.get_event_loop().run_until_complete(
-                _do_litapi_infer(server, "my_model", None, {"x": 1})
-            )
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    _do_litapi_infer(server, "my_model", None, {"x": 1})
+                )
+            finally:
+                loop.close()
         assert exc_info.value.status_code == 429
         assert "full" in exc_info.value.detail.lower()
 
@@ -141,8 +145,12 @@ class TestHTTPQueueLimit:
             QueueFullError("Queue full")
         )
 
-        asyncio.get_event_loop().run_until_complete(
-            _do_ws_stream(server, "my_model", None, ws)
-        )
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(
+                _do_ws_stream(server, "my_model", None, ws)
+            )
+        finally:
+            loop.close()
         assert "close" in called
         assert "full" in called["close"].get("reason", "").lower()

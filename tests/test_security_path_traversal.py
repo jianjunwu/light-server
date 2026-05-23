@@ -109,7 +109,11 @@ class TestHTTPPathTraversal:
         return LightServer(config)
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
 
     def test_infer_handler_rejects_traversal_name(self, server):
         from light_server.http.handlers import _do_infer

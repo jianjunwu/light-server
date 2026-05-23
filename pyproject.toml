@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "litserve>=0.2.0",
+    "litserve==0.2.17",
     "pyyaml>=6.0",
     "prometheus-client>=0.15.0",
     "cryptography>=41.0.0",
@@ -37,14 +37,21 @@ grpc = [
     "grpcio>=1.50.0",
     "grpcio-tools>=1.50.0",
 ]
-test = [
+websocket = []
+all = ["light-server[grpc]"]
+
+[dependency-groups]
+dev = [
     "pytest>=7.0.0",
+    "pytest-xdist>=3.0.0",
     "requests>=2.25.0",
     "websockets>=12.0",
     "pytest-asyncio>=0.21.0",
+    "jinja2>=3.0",
+    "python-multipart>=0.0.5",
+    "grpcio>=1.50.0",
+    "grpcio-tools>=1.50.0",
 ]
-websocket = []
-all = ["light-server[grpc]"]
 
 [project.urls]
 Homepage = "https://github.com/jianjunwu/light-server"
@@ -56,6 +63,9 @@ light-server = "light_server.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/light_server"]
+
+[tool.pytest.ini_options]
+addopts = "-n auto"
 
 [tool.ruff]
 line-length = 120

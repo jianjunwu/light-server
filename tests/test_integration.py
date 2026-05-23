@@ -1,4 +1,5 @@
 import json
+import socket
 import subprocess
 import sys
 import tempfile
@@ -11,7 +12,14 @@ import requests
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _make_server_config(repo_path: Path) -> str:
+def _get_free_port() -> int:
+    """Return an available TCP port on 127.0.0.1."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _make_server_config(repo_path: Path, http_port: int, grpc_port: int, metrics_port: int) -> str:
     """Generate a server config YAML that points to the given model repo."""
     return f"""
 grpc:
@@ -24,21 +32,38 @@ model_repository:
   control_mode: explicit
   path: {repo_path}
 server:
-  grpc_port: 18001
+  grpc_port: {grpc_port}
   host: 127.0.0.1
-  http_port: 18000
+  http_port: {http_port}
   log_level: warning
-  metrics_port: 18002
+  metrics_port: {metrics_port}
   num_api_servers: 1
 """
 
 
+def _cleanup(proc, temp_config):
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    try:
+        Path(temp_config).unlink()
+    except OSError:
+        pass
+
+
 def test_server_startup_and_inference(isolated_model_repo):
     """E2E test: start server, call inference, call admin APIs, shutdown."""
+    http_port = _get_free_port()
+    grpc_port = _get_free_port()
+    metrics_port = _get_free_port()
+
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".yaml", delete=False
     ) as f:
-        f.write(_make_server_config(isolated_model_repo))
+        f.write(_make_server_config(isolated_model_repo, http_port, grpc_port, metrics_port))
         temp_config = f.name
 
     proc = subprocess.Popen(
@@ -58,7 +83,7 @@ def test_server_startup_and_inference(isolated_model_repo):
 
     try:
         # Wait for server startup by polling health endpoint
-        base = "http://127.0.0.1:18000"
+        base = f"http://127.0.0.1:{http_port}"
         for _ in range(60):
             time.sleep(0.2)
             try:
@@ -76,8 +101,6 @@ def test_server_startup_and_inference(isolated_model_repo):
             )
             print("Server output:", stdout_data)
             raise RuntimeError("Server did not start")
-
-        time.sleep(0.5)
 
         # Health check
         resp = requests.get(f"{base}/health", timeout=5)
@@ -126,16 +149,13 @@ def test_server_startup_and_inference(isolated_model_repo):
         assert resp.status_code == 200
 
         # Model should be ready
-        time.sleep(2)
-        resp = requests.get(f"{base}/v2/models/test_model/ready", timeout=5)
-        assert resp.json()["ready"] is True
+        for _ in range(40):
+            time.sleep(0.15)
+            resp = requests.get(f"{base}/v2/models/test_model/ready", timeout=5)
+            if resp.json()["ready"]:
+                break
+        else:
+            raise RuntimeError("Model did not become ready after reload")
 
     finally:
-        proc.terminate()
-        proc.wait(timeout=10)
-        if proc.poll() is None:
-            proc.kill()
-        try:
-            Path(temp_config).unlink()
-        except OSError:
-            pass
+        _cleanup(proc, temp_config)

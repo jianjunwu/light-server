@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -11,10 +12,22 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _get_free_port() -> int:
+    """Return an available TCP port on 127.0.0.1."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def _start_server_with_grpc(repo_path: Path):
     """Start light-server with gRPC enabled and return (proc, temp_config_path, base_url, grpc_target)."""
+    http_port = _get_free_port()
+    grpc_port = _get_free_port()
+    metrics_port = _get_free_port()
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write(f"""
+        f.write(
+            f"""
 grpc:
   enabled: true
   max_workers: 10
@@ -26,13 +39,14 @@ model_repository:
   control_mode: explicit
   path: {repo_path}
 server:
-  grpc_port: 18001
+  grpc_port: {grpc_port}
   host: 127.0.0.1
-  http_port: 18000
+  http_port: {http_port}
   log_level: warning
-  metrics_port: 18002
+  metrics_port: {metrics_port}
   num_api_servers: 1
-""")
+"""
+        )
         temp_config = f.name
 
     proc = subprocess.Popen(
@@ -43,10 +57,11 @@ server:
         cwd=str(PROJECT_ROOT),
     )
 
-    base = "http://127.0.0.1:18000"
-    grpc_target = "127.0.0.1:18001"
+    base = f"http://127.0.0.1:{http_port}"
+    grpc_target = f"127.0.0.1:{grpc_port}"
 
     import requests
+
     for _ in range(60):
         time.sleep(0.2)
         try:
@@ -60,7 +75,6 @@ server:
         proc.wait(timeout=5)
         raise RuntimeError("Server did not start")
 
-    time.sleep(0.5)
     return proc, temp_config, base, grpc_target
 
 
@@ -77,6 +91,19 @@ def _cleanup(proc, temp_config):
         pass
 
 
+def _wait_for_model_ready(base: str, model_name: str, timeout: float = 5.0) -> None:
+    """Poll /v2/models/{model_name}/ready until it returns ready=True."""
+    import requests
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        resp = requests.get(f"{base}/v2/models/{model_name}/ready", timeout=2)
+        if resp.json().get("ready"):
+            return
+        time.sleep(0.15)
+    raise RuntimeError(f"Model {model_name} did not become ready")
+
+
 def test_grpc_predict(isolated_model_repo):
     """E2E test: gRPC unary Predict for test_model."""
     proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
@@ -84,15 +111,7 @@ def test_grpc_predict(isolated_model_repo):
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
 
-        # Wait for test_model to be ready (loaded by config)
-        import requests
-        for _ in range(20):
-            time.sleep(0.3)
-            resp = requests.get(f"{base}/v2/models/test_model/ready", timeout=5)
-            if resp.json().get("ready"):
-                break
-        else:
-            raise RuntimeError("Model did not become ready")
+        _wait_for_model_ready(base, "test_model")
 
         channel = grpc.insecure_channel(grpc_target)
         stub = litserve_pb2_grpc.InferenceStub(channel)
@@ -125,13 +144,7 @@ def test_grpc_stream_predict(isolated_model_repo):
         )
         assert resp.status_code == 200
 
-        for _ in range(20):
-            time.sleep(0.3)
-            resp = requests.get(f"{base}/v2/models/stream_model/ready", timeout=5)
-            if resp.json().get("ready"):
-                break
-        else:
-            raise RuntimeError("Model did not become ready")
+        _wait_for_model_ready(base, "stream_model")
 
         channel = grpc.insecure_channel(grpc_target)
         stub = litserve_pb2_grpc.InferenceStub(channel)
@@ -169,7 +182,9 @@ def test_grpc_model_control(isolated_model_repo):
         stub = litserve_pb2_grpc.ModelControlStub(channel)
 
         # ModelReady for non-loaded model
-        resp = stub.ModelReady(litserve_pb2.ModelReadyRequest(model_name="stream_model"))
+        resp = stub.ModelReady(
+            litserve_pb2.ModelReadyRequest(model_name="stream_model")
+        )
         assert resp.ready is False
 
         # Load via HTTP admin, then check via gRPC
@@ -178,24 +193,22 @@ def test_grpc_model_control(isolated_model_repo):
         )
         assert http_resp.status_code == 200
 
-        for _ in range(20):
-            time.sleep(0.3)
-            resp = stub.ModelReady(litserve_pb2.ModelReadyRequest(model_name="stream_model"))
-            if resp.ready:
-                break
-        else:
-            raise RuntimeError("Model did not become ready")
+        _wait_for_model_ready(base, "stream_model")
 
         # RepositoryIndex
         resp = stub.RepositoryIndex(litserve_pb2.Empty())
         assert any(m.name == "stream_model" for m in resp.models)
 
         # Unload
-        resp = stub.UnloadModel(litserve_pb2.UnloadModelRequest(model_name="stream_model"))
+        resp = stub.UnloadModel(
+            litserve_pb2.UnloadModelRequest(model_name="stream_model")
+        )
         assert resp.success is True
 
-        time.sleep(0.5)
-        resp = stub.ModelReady(litserve_pb2.ModelReadyRequest(model_name="stream_model"))
+        time.sleep(0.2)
+        resp = stub.ModelReady(
+            litserve_pb2.ModelReadyRequest(model_name="stream_model")
+        )
         assert resp.ready is False
 
         channel.close()
@@ -206,55 +219,9 @@ def test_grpc_model_control(isolated_model_repo):
 
 def test_grpc_bidirectional_stream(isolated_model_repo):
     """E2E test: start server with gRPC enabled, connect via BidirectionalStream."""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write(f"""
-grpc:
-  enabled: true
-  max_workers: 10
-load_models:
-- test_model
-metrics:
-  enabled: false
-model_repository:
-  control_mode: explicit
-  path: {isolated_model_repo}
-server:
-  grpc_port: 18001
-  host: 127.0.0.1
-  http_port: 18000
-  log_level: warning
-  metrics_port: 18002
-  num_api_servers: 1
-""")
-        temp_config = f.name
-
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "light_server", "serve", "--config", temp_config],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        cwd=str(PROJECT_ROOT),
-    )
-
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
     try:
-        base = "http://127.0.0.1:18000"
-        grpc_target = "127.0.0.1:18001"
-
         import requests
-        for _ in range(60):
-            time.sleep(0.2)
-            try:
-                resp = requests.get(f"{base}/health", timeout=2)
-                if resp.status_code == 200:
-                    break
-            except requests.ConnectionError:
-                continue
-        else:
-            stdout_data = proc.stdout.read1().decode() if hasattr(proc.stdout, "read1") else ""
-            print("Server output:", stdout_data)
-            raise RuntimeError("Server did not start")
-
-        time.sleep(0.5)
 
         # Load the stream model
         resp = requests.post(
@@ -264,13 +231,7 @@ server:
         print(f"Load response: {resp.status_code} - {resp.text}")
         assert resp.status_code == 200
 
-        for _ in range(20):
-            time.sleep(0.3)
-            resp = requests.get(f"{base}/v2/models/stream_model/ready", timeout=5)
-            if resp.json().get("ready"):
-                break
-        else:
-            raise RuntimeError("Model did not become ready")
+        _wait_for_model_ready(base, "stream_model")
 
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
@@ -309,7 +270,9 @@ server:
 
         print(f"Received {len(received)} messages")
         # Should have at least 3 echo responses + 1 final
-        assert len(received) >= 3, f"Expected at least 3 responses, got {len(received)}"
+        assert len(received) >= 3, (
+            f"Expected at least 3 responses, got {len(received)}"
+        )
 
         # Verify echoes
         for i, msg in enumerate(received[:3]):
@@ -320,21 +283,14 @@ server:
         channel.close()
 
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-        try:
-            os.unlink(temp_config)
-        except OSError:
-            pass
+        _cleanup(proc, temp_config)
 
 
 def test_grpc_predict_model_not_ready(isolated_model_repo):
     """E2E test: gRPC Predict for unloaded model should return NOT_FOUND."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(
+        isolated_model_repo
+    )
     try:
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
@@ -351,7 +307,10 @@ def test_grpc_predict_model_not_ready(isolated_model_repo):
             assert False, "Expected NOT_FOUND error"
         except grpc.RpcError as e:
             assert e.code() == grpc.StatusCode.NOT_FOUND
-            assert "not ready" in e.details().lower() or "nonexistent_model" in e.details()
+            assert (
+                "not ready" in e.details().lower()
+                or "nonexistent_model" in e.details()
+            )
 
         channel.close()
     finally:
@@ -360,7 +319,9 @@ def test_grpc_predict_model_not_ready(isolated_model_repo):
 
 def test_grpc_stream_predict_model_not_ready(isolated_model_repo):
     """E2E test: gRPC StreamPredict for unloaded model should return NOT_FOUND."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(
+        isolated_model_repo
+    )
     try:
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
@@ -385,7 +346,9 @@ def test_grpc_stream_predict_model_not_ready(isolated_model_repo):
 
 def test_grpc_bidirectional_stream_missing_model_name(isolated_model_repo):
     """E2E test: BidirectionalStream first chunk without model_name should fail."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(
+        isolated_model_repo
+    )
     try:
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
@@ -415,7 +378,9 @@ def test_grpc_bidirectional_stream_missing_model_name(isolated_model_repo):
 
 def test_grpc_bidirectional_stream_model_not_ready(isolated_model_repo):
     """E2E test: BidirectionalStream for unloaded model should return NOT_FOUND."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(
+        isolated_model_repo
+    )
     try:
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
@@ -426,7 +391,9 @@ def test_grpc_bidirectional_stream_model_not_ready(isolated_model_repo):
         def request_generator():
             yield litserve_pb2.StreamChunk(
                 stream_id="test-not-ready",
-                payload=json.dumps({"model_name": "nonexistent_model"}).encode("utf-8"),
+                payload=json.dumps(
+                    {"model_name": "nonexistent_model"}
+                ).encode("utf-8"),
                 is_final=False,
             )
 
@@ -443,20 +410,15 @@ def test_grpc_bidirectional_stream_model_not_ready(isolated_model_repo):
 
 def test_grpc_predict_invalid_json(isolated_model_repo):
     """E2E test: gRPC Predict with invalid JSON payload should return INVALID_ARGUMENT."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(
+        isolated_model_repo
+    )
     try:
         import requests
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
 
-        # Wait for test_model to be ready
-        for _ in range(20):
-            time.sleep(0.3)
-            resp = requests.get(f"{base}/v2/models/test_model/ready", timeout=5)
-            if resp.json().get("ready"):
-                break
-        else:
-            raise RuntimeError("Model did not become ready")
+        _wait_for_model_ready(base, "test_model")
 
         channel = grpc.insecure_channel(grpc_target)
         stub = litserve_pb2_grpc.InferenceStub(channel)

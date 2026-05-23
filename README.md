@@ -72,6 +72,21 @@ pip install light-server
 
 需要 Python >= 3.10。
 
+### 从源码开发
+
+本项目使用 [uv](https://docs.astral.sh/uv/) 管理依赖：
+
+```bash
+# 克隆仓库并同步依赖
+uv sync
+
+# 运行测试
+uv run pytest tests/ -v
+
+# 启动服务（开发模式）
+uv run light-server serve --config server.yaml
+```
+
 ## 快速开始
 
 ### 方式一：项目脚手架（推荐）

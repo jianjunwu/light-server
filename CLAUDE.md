@@ -9,23 +9,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Common Commands
 
 ```bash
-# Development install
-pip install -e .
+# Development install (creates .venv automatically)
+uv sync
 
 # Run all tests
-python3 -m pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run a single test file
-python3 -m pytest tests/test_integration.py -v -s
+uv run pytest tests/test_integration.py -v -s
 
 # Start the server with config
-python3 -m light_server serve --config server.yaml
+uv run python -m light_server serve --config server.yaml
 
 # Or via installed CLI
-light-server serve --config server.yaml
+uv run light-server serve --config server.yaml
 
 # Validate config
-light-server config-check server.yaml
+uv run light-server config-check server.yaml
+
+# Add a dependency
+uv add <package>
+
+# Add a dev dependency
+uv add --dev <package>
 ```
 
 ## High-Level Architecture

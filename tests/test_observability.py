@@ -116,7 +116,7 @@ def test_ensemble_metrics_graceful_without_system_metrics():
             "load": lambda *a, **k: True,
         },
     )()
-    server.config = type("C", (), {"server": type("S", (), {"timeout": 10})()})()
+    server.config = type("C", (), {"server": type("S", (), {"timeout": 0.1})()})()
     server.response_buffer = {}
 
     config = EnsembleConfig(

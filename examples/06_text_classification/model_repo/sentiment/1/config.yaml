@@ -1,0 +1,4 @@
+name: sentiment
+max_batch_size: 8
+batch_timeout: 0.01
+accelerator: cpu

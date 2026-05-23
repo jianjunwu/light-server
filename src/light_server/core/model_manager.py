@@ -230,6 +230,11 @@ class ModelManager:
             if model_config.get("bidirectional", False):
                 from light_server.core.loops import BidirectionalStreamingLoop
                 loop = BidirectionalStreamingLoop()
+            elif model_config.get("continuous_batching", False):
+                from litserve.loops import ContinuousBatchingLoop
+                loop = ContinuousBatchingLoop(
+                    max_sequence_length=model_config.get("max_sequence_length", 2048)
+                )
             elif max_batch_size > 1:
                 loop = AdaptiveBatchedLoop()
             else:
@@ -628,12 +633,25 @@ class ModelManager:
                 config["stream"] = override.stream
             if override.bidirectional:
                 config["bidirectional"] = override.bidirectional
+            if override.continuous_batching:
+                config["continuous_batching"] = override.continuous_batching
+            if override.max_sequence_length != 2048:
+                config["max_sequence_length"] = override.max_sequence_length
             if override.accelerator:
                 config["accelerator"] = override.accelerator
             if override.devices is not None:
                 config["devices"] = override.devices
             if override.workers_per_device is not None:
                 config["workers_per_device"] = override.workers_per_device
+
+        # Continuous batching manages concurrency internally; force single worker
+        if config.get("continuous_batching", False):
+            wp = config.get("workers_per_device", 1)
+            if wp != 1:
+                logger.warning(
+                    f"continuous_batching enabled; forcing workers_per_device=1 (was {wp})"
+                )
+            config["workers_per_device"] = 1
 
         return config
 
@@ -792,6 +810,11 @@ def _inference_worker_wrapper(
         if config.get("bidirectional", False):
             from light_server.core.loops import BidirectionalStreamingLoop
             loop = BidirectionalStreamingLoop()
+        elif config.get("continuous_batching", False):
+            from litserve.loops import ContinuousBatchingLoop
+            loop = ContinuousBatchingLoop(
+                max_sequence_length=config.get("max_sequence_length", 2048)
+            )
         elif max_batch_size > 1:
             loop = AdaptiveBatchedLoop()
         else:

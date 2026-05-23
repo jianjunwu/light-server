@@ -1,0 +1,7 @@
+name: cb_model
+api_path: /predict
+max_batch_size: 4
+stream: true
+continuous_batching: true
+max_sequence_length: 10
+accelerator: cpu

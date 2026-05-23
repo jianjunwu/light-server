@@ -27,25 +27,25 @@ graph LR
 
 ## Why light-server?
 
-| | light-server | Triton | vLLM | BentoML |
-|---|---|---|---|---|
-| **Positioning** | Lightweight multi-framework inference server | Full-featured inference platform | LLM only | Full-stack MLOps |
-| **Learning curve** | One command to start | Requires build/complex config | Needs GPU scheduling knowledge | Steep learning curve |
-| **Model frameworks** | PyTorch/TF/ONNX/any Python | TensorRT/ONNX/PyTorch | LLM only | Multiple backends |
-| **Protocols** | HTTP + gRPC + WebSocket + metrics | HTTP + gRPC + many protocols | HTTP + OpenAI API | HTTP + gRPC |
-| **Model management** | Filesystem repo + hot load/unload | Model repo + versioning | Single model service | Bento repo |
-| **Batching** | Adaptive batching | Dynamic batching | Continuous Batching | Requires config |
-| **Resource usage** | Lightweight, single process | Heavy, multi-service | GPU intensive | Medium |
-| **Best for** | Small-to-medium inference, rapid iteration | Large-scale production clusters | LLM inference | End-to-end MLOps |
+| | light-server | LitServe | Triton | vLLM | BentoML |
+|---|---|---|---|---|---|
+| **Positioning** | Lightweight multi-framework inference server | Python inference library | Full-featured inference platform | LLM only | Full-stack MLOps |
+| **Learning curve** | One command to start | Requires server code | Requires build/complex config | Needs GPU scheduling knowledge | Steep learning curve |
+| **Model frameworks** | PyTorch/TF/ONNX/any Python | PyTorch/any Python | TensorRT/ONNX/PyTorch | LLM only | Multiple backends |
+| **Protocols** | HTTP + gRPC + WebSocket + metrics | HTTP only | HTTP + gRPC + many protocols | HTTP + OpenAI API | HTTP + gRPC |
+| **Model management** | Filesystem repo + hot load/unload | None | Model repo + versioning | Single model service | Bento repo |
+| **Batching** | Adaptive batching + Continuous Batching | Adaptive batching | Dynamic batching | Continuous Batching | Requires config |
+| **Resource usage** | Lightweight, single process | Lightweight | Heavy, multi-service | GPU intensive | Medium |
+| **Best for** | Small-to-medium inference, rapid iteration | Quick prototyping / single model | Large-scale production clusters | LLM inference | End-to-end MLOps |
 
-**The core value of light-server**: If you need a server that can serve multiple models (not just LLMs), supports hot updates, has monitoring metrics, and is quick to get started, light-server is lighter than Triton and more general-purpose than vLLM.
+**The core value of light-server**: If you need a server that can serve multiple models (not just LLMs), supports hot updates, has monitoring metrics, and is quick to get started, light-server is lighter than Triton and more general-purpose than vLLM. It adds model repository management, multi-protocol serving, and operational capabilities on top of [LitServe](https://github.com/Lightning-AI/litserve).
 
 ## Features
 
 - **Multi-protocol serving**: HTTP REST, gRPC, and Prometheus metrics on separate ports; WebSocket for bidirectional streaming
 - **Triton-style model repository**: filesystem-based layout with versioned models
 - **Hot load/unload**: load and unload models via admin APIs without restarting the server
-- **Batching & streaming**: configure `max_batch_size`, `batch_timeout`, and streaming per model
+- **Batching & streaming**: adaptive batching + Continuous Batching; configure `max_batch_size`, `batch_timeout`, streaming, and Continuous Batching per model
 - **Model Analyzer**: automatically find optimal batch size / timeout / concurrency configurations
 - **Benchmark tool**: built-in HTTP benchmark with latency percentiles (p50/p90/p99/p99.9)
 - **Artifact packaging**: pack/unpack models into signed `.lma` artifacts for deployment
@@ -115,6 +115,15 @@ Optionally add `model_repo/test_model/1/config.yaml`:
 max_batch_size: 4
 batch_timeout: 0.01
 stream: false
+```
+
+Continuous Batching configuration (for LLM token-by-token generation):
+
+```yaml
+max_batch_size: 8          # max concurrent sequences
+stream: true               # Continuous Batching requires streaming
+continuous_batching: true
+max_sequence_length: 2048
 ```
 
 #### 2. Start the server
@@ -245,6 +254,7 @@ See the [`examples/`](examples/) directory for runnable examples:
 | [`03_cv_pipeline`](examples/03_cv_pipeline/) | Real CV pipeline — image preprocessing + ResNet classification |
 | [`04_llm_streaming`](examples/04_llm_streaming/) | LLM streaming inference — WebSocket token-by-token generation |
 | [`05_docker`](examples/05_docker/) | Docker containerized deployment — Dockerfile + docker-compose |
+| [`06_text_classification`](examples/06_text_classification/) | Real NLP classification — DistilBERT sentiment analysis + adaptive batching |
 
 Each example includes a `run.sh` one-shot script and `test_model.py` for standalone model validation.
 

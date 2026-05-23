@@ -27,25 +27,25 @@ graph LR
 
 ## 为什么选择 light-server？
 
-| | light-server | Triton | vLLM | BentoML |
-|---|---|---|---|---|
-| **定位** | 轻量多框架推理服务 | 全功能推理平台 | 仅 LLM | 全栈 MLOps |
-| **上手难度** | 一条命令启动 | 需要编译/复杂配置 | 需了解 GPU 调度 | 学习曲线陡峭 |
-| **模型框架** | PyTorch/TF/ONNX/任意 Python | TensorRT/ONNX/PyTorch | 仅 LLM | 多种后端 |
-| **协议支持** | HTTP + gRPC + WebSocket + 指标 | HTTP + gRPC + 多种协议 | HTTP + OpenAI API | HTTP + gRPC |
-| **模型管理** | 文件系统仓库 + 热加载/卸载 | 模型仓库 + 版本管理 | 单模型服务 | Bento 仓库 |
-| **批处理** | 自适应批处理 | 动态批处理 | Continuous Batching | 需配置 |
-| **资源占用** | 轻量，单进程起步 | 较重，多服务组件 | GPU 密集型 | 中等 |
-| **最佳场景** | 中小规模推理服务、快速迭代 | 大规模生产推理集群 | 大模型推理 | 端到端 MLOps |
+| | light-server | LitServe | Triton | vLLM | BentoML |
+|---|---|---|---|---|---|
+| **定位** | 轻量多框架推理服务 | Python 推理库 | 全功能推理平台 | 仅 LLM | 全栈 MLOps |
+| **上手难度** | 一条命令启动 | 需自行编写 server 代码 | 需要编译/复杂配置 | 需了解 GPU 调度 | 学习曲线陡峭 |
+| **模型框架** | PyTorch/TF/ONNX/任意 Python | PyTorch/任意 Python | TensorRT/ONNX/PyTorch | 仅 LLM | 多种后端 |
+| **协议支持** | HTTP + gRPC + WebSocket + 指标 | 仅 HTTP | HTTP + gRPC + 多种协议 | HTTP + OpenAI API | HTTP + gRPC |
+| **模型管理** | 文件系统仓库 + 热加载/卸载 | 无 | 模型仓库 + 版本管理 | 单模型服务 | Bento 仓库 |
+| **批处理** | 自适应批处理 + Continuous Batching | 自适应批处理 | 动态批处理 | Continuous Batching | 需配置 |
+| **资源占用** | 轻量，单进程起步 | 轻量 | 较重，多服务组件 | GPU 密集型 | 中等 |
+| **最佳场景** | 中小规模推理服务、快速迭代 | 快速原型/单模型 | 大规模生产推理集群 | 大模型推理 | 端到端 MLOps |
 
-**light-server 的核心价值**：如果你需要一个能同时服务多个模型（不限于 LLM）、支持热更新、有监控指标、又能快速上手的推理服务器，light-server 是比 Triton 更轻、比 vLLM 更通用的选择。
+**light-server 的核心价值**：如果你需要一个能同时服务多个模型（不限于 LLM）、支持热更新、有监控指标、又能快速上手的推理服务器，light-server 是比 Triton 更轻、比 vLLM 更通用的选择。它在 [LitServe](https://github.com/Lightning-AI/litserve) 之上增加了模型仓库管理、多协议服务和运维能力。
 
 ## 特性
 
 - **多协议服务**：HTTP REST、gRPC 和 Prometheus 指标分别监听不同端口，WebSocket 支持双向流式推理
 - **Triton 风格模型仓库**：基于文件系统的分层结构，支持版本化管理
 - **热加载/卸载**：通过管理 API 加载和卸载模型，无需重启服务
-- **批处理与流式**：每个模型可独立配置 `max_batch_size`、`batch_timeout` 和流式响应
+- **批处理与流式**：自适应批处理 + Continuous Batching；每个模型可独立配置 `max_batch_size`、`batch_timeout`、流式响应和 Continuous Batching
 - **模型分析器**：自动寻找最优的批大小 / 超时时间 / 并发配置
 - **基准测试工具**：内置 HTTP 压测，输出 p50/p90/p99/p99.9 延迟分位值
 - **制品打包**：将模型目录打包为带签名的 `.lma` 制品，便于部署
@@ -115,6 +115,15 @@ class MyAPI(LitAPI):
 max_batch_size: 4
 batch_timeout: 0.01
 stream: false
+```
+
+Continuous Batching 配置（适用于 LLM 逐 token 生成场景）：
+
+```yaml
+max_batch_size: 8          # 同时活跃的序列数上限
+stream: true               # Continuous Batching 必须启用流式
+continuous_batching: true
+max_sequence_length: 2048
 ```
 
 #### 2. 启动服务
@@ -257,6 +266,7 @@ model_repo/
 | [`03_cv_pipeline`](examples/03_cv_pipeline/) | 真实 CV 流水线 — 图像预处理 + ResNet 分类 |
 | [`04_llm_streaming`](examples/04_llm_streaming/) | LLM 流式推理 — WebSocket 逐 token 生成 |
 | [`05_docker`](examples/05_docker/) | Docker 容器化部署 — Dockerfile + docker-compose |
+| [`06_text_classification`](examples/06_text_classification/) | 真实 NLP 分类 — DistilBERT 情感分析 + 自适应批处理 |
 
 每个示例都包含 `run.sh` 一键运行脚本和 `test_model.py` 模型逻辑验证。
 

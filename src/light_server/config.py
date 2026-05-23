@@ -67,6 +67,8 @@ class ModelConfig:
     batch_timeout: float = 0.0
     stream: bool = False
     bidirectional: bool = False
+    continuous_batching: bool = False
+    max_sequence_length: int = 2048
     accelerator: str | None = None
     devices: int | str | None = None
     workers_per_device: int | None = None

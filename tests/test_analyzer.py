@@ -242,3 +242,155 @@ def test_cli_analyze_parser():
     with pytest.raises(SystemExit) as exc_info:
         main(["analyze", "--help"])
     assert exc_info.value.code == 0
+
+
+def test_streaming_benchmark_result_structure():
+    """StreamingBenchmarkResult should contain streaming metrics."""
+    from light_server.analyzer.benchmark import StreamingBenchmarkResult, StreamingMetrics, LatencyDistribution
+
+    result = StreamingBenchmarkResult(
+        total_requests=10,
+        successful_requests=8,
+        failed_requests=2,
+        throughput=4.0,
+        latency_ms=LatencyDistribution(),
+        duration_seconds=2.0,
+        errors=[],
+        streaming=StreamingMetrics(
+            ttft_ms=15.0,
+            tbt_ms=LatencyDistribution(p50=5.0, p90=8.0, mean=6.0),
+            tpot_ms=20.0,
+            total_chunks=24,
+            total_streams=8,
+            failed_streams=2,
+        ),
+    )
+    assert result.streaming.ttft_ms == 15.0
+    assert result.streaming.tbt_ms.p50 == 5.0
+    assert result.streaming.total_chunks == 24
+    assert result.streaming.total_streams == 8
+    assert result.streaming.failed_streams == 2
+
+
+def test_streaming_benchmark_engine_fixed():
+    """Streaming benchmark fixed mode should collect TTFT/TBT/TPOT."""
+    from light_server.analyzer.benchmark import StreamingBenchmarkEngine
+    import time
+
+    call_count = 0
+
+    async def mock_target(payload):
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.01)
+        return {
+            "ttft_ms": 5.0 + call_count,
+            "tbt_values": [2.0, 3.0, 2.5],
+            "tpot_ms": 10.0,
+            "total_chunks": 3,
+        }
+
+    engine = StreamingBenchmarkEngine()
+    result = asyncio.run(
+        engine.run(
+            target=mock_target,
+            payload={"input": 1.0},
+            mode="fixed",
+            concurrency=2,
+            duration=0.5,
+            warmup_streams=0,
+            num_chunks_per_stream=3,
+        )
+    )
+
+    assert result.total_requests > 0
+    assert result.successful_requests > 0
+    assert result.streaming.ttft_ms > 0
+    assert result.streaming.tbt_ms.mean > 0
+    assert result.streaming.tpot_ms > 0
+    assert result.streaming.total_streams > 0
+
+
+def test_streaming_benchmark_engine_with_errors():
+    """Streaming benchmark should count failed streams."""
+    from light_server.analyzer.benchmark import StreamingBenchmarkEngine
+
+    async def failing_target(payload):
+        await asyncio.sleep(0.01)
+        raise RuntimeError("stream failed")
+
+    engine = StreamingBenchmarkEngine()
+    result = asyncio.run(
+        engine.run(
+            target=failing_target,
+            payload={"input": 1.0},
+            mode="fixed",
+            concurrency=1,
+            duration=0.2,
+            warmup_streams=0,
+        )
+    )
+
+    assert result.failed_requests > 0
+    assert result.streaming.failed_streams > 0
+    assert len(result.errors) > 0
+
+
+def test_streaming_benchmark_engine_ramp():
+    """Streaming benchmark ramp mode should increase concurrency."""
+    from light_server.analyzer.benchmark import StreamingBenchmarkEngine
+
+    max_concurrent = 0
+    current_concurrent = 0
+    lock = asyncio.Lock()
+
+    async def mock_target(payload):
+        nonlocal max_concurrent, current_concurrent
+        async with lock:
+            current_concurrent += 1
+            if current_concurrent > max_concurrent:
+                max_concurrent = current_concurrent
+        await asyncio.sleep(0.02)
+        async with lock:
+            current_concurrent -= 1
+        return {
+            "ttft_ms": 1.0,
+            "tbt_values": [1.0],
+            "tpot_ms": 2.0,
+            "total_chunks": 1,
+        }
+
+    engine = StreamingBenchmarkEngine()
+    result = asyncio.run(
+        engine.run(
+            target=mock_target,
+            payload={"input": 1.0},
+            mode="ramp",
+            concurrency=1,
+            duration=1.0,
+            max_concurrency=4,
+            step_duration=0.3,
+            warmup_streams=0,
+        )
+    )
+
+    assert result.total_requests > 0
+    assert max_concurrent > 1
+
+
+def test_websocket_streaming_target_url():
+    """WebSocketStreamingTarget should build correct WS URL."""
+    from light_server.analyzer.benchmark import WebSocketStreamingTarget
+
+    target = WebSocketStreamingTarget(
+        base_url="http://127.0.0.1:8000",
+        model_name="stream_model",
+        version="2",
+    )
+    assert target.base_url == "ws://127.0.0.1:8000"
+
+    target_no_version = WebSocketStreamingTarget(
+        base_url="https://example.com",
+        model_name="m",
+    )
+    assert target_no_version.base_url == "wss://example.com"

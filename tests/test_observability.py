@@ -134,3 +134,87 @@ def test_ensemble_metrics_graceful_without_system_metrics():
             await executor.execute(server, config, {"v": 1.0}, ensemble_name="test")
 
     asyncio.run(run())
+
+
+def test_streaming_metrics_lifecycle():
+    """Streaming metrics should track open/chunk/close lifecycle correctly."""
+    registry, _ = setup_multiproc_metrics(clean=True)
+    sm = SystemMetrics(registry)
+
+    # Verify streaming metrics exist
+    assert sm.streaming_connections is not None
+    assert sm.streaming_ttft is not None
+    assert sm.streaming_tbt is not None
+    assert sm.streaming_chunks_total is not None
+
+    stream_id = "test-stream-1"
+    model = "stream_model"
+    version = "1"
+    protocol = "grpc"
+
+    # Open stream
+    sm.record_stream_open(model, version, protocol, stream_id)
+    assert stream_id in sm._stream_first_token_times
+    assert sm._stream_first_token_times[stream_id] == 0.0
+
+    # Simulate request start for TTFT calculation
+    sm.record_request_start(model, version)
+
+    # First chunk should record TTFT (not TBT)
+    sm.record_stream_chunk(model, version, protocol, stream_id)
+    assert sm._stream_first_token_times[stream_id] != 0.0
+    assert sm._stream_last_token_times[stream_id] == sm._stream_first_token_times[stream_id]
+
+    # Second chunk should record TBT
+    sm.record_stream_chunk(model, version, protocol, stream_id)
+    assert sm._stream_last_token_times[stream_id] >= sm._stream_first_token_times[stream_id]
+
+    # Third chunk
+    sm.record_stream_chunk(model, version, protocol, stream_id)
+
+    # Close stream should clean up state
+    sm.record_stream_close(model, version, protocol, stream_id)
+    assert stream_id not in sm._stream_first_token_times
+    assert stream_id not in sm._stream_last_token_times
+
+
+def test_streaming_metrics_multiple_streams():
+    """Multiple concurrent streams should be tracked independently."""
+    registry, _ = setup_multiproc_metrics(clean=True)
+    sm = SystemMetrics(registry)
+
+    s1 = "stream-1"
+    s2 = "stream-2"
+
+    sm.record_stream_open("m", "1", "ws", s1)
+    sm.record_stream_open("m", "1", "ws", s2)
+
+    assert s1 in sm._stream_first_token_times
+    assert s2 in sm._stream_first_token_times
+
+    sm.record_request_start("m", "1")
+    sm.record_stream_chunk("m", "1", "ws", s1)
+    sm.record_stream_chunk("m", "1", "ws", s2)
+
+    sm.record_stream_close("m", "1", "ws", s1)
+    assert s1 not in sm._stream_first_token_times
+    assert s2 in sm._stream_first_token_times
+
+    sm.record_stream_close("m", "1", "ws", s2)
+    assert s2 not in sm._stream_first_token_times
+
+
+def test_streaming_metrics_without_request_start():
+    """Stream chunk without prior request_start should not crash TTFT recording."""
+    registry, _ = setup_multiproc_metrics(clean=True)
+    sm = SystemMetrics(registry)
+
+    stream_id = "orphan-stream"
+    sm.record_stream_open("m", "1", "grpc", stream_id)
+
+    # No record_request_start called - TTFT should still work (no start time to diff against)
+    sm.record_stream_chunk("m", "1", "grpc", stream_id)
+    assert sm._stream_first_token_times[stream_id] != 0.0
+
+    sm.record_stream_close("m", "1", "grpc", stream_id)
+    assert stream_id not in sm._stream_first_token_times

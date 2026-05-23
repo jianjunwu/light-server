@@ -2,13 +2,47 @@
 
 [English](README.en.md) | 简体中文
 
-基于 [LitServe](https://github.com/Lightning-AI/litserve) 的 Triton 风格 CLI 部署接口。
+<p align="center">
+  <strong>像写 Flask 接口一样简单，像 Triton 一样生产可用</strong>
+</p>
 
-`light-server` 提供多端口推理服务，包含 HTTP（推理 + 管理）、gRPC 和 Prometheus 指标端点，以基于文件系统的模型仓库为后端，支持模型的热加载与热卸载。
+<p align="center">
+  <a href="https://pypi.org/project/light-server/"><img src="https://img.shields.io/pypi/v/light-server.svg" alt="PyPI"></a>
+  <a href="https://pypi.org/project/light-server/"><img src="https://img.shields.io/pypi/pyversions/light-server.svg" alt="Python"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+</p>
+
+`light-server` 是基于 [LitServe](https://github.com/Lightning-AI/litserve) 的 Triton 风格 CLI 部署接口。它提供多端口推理服务（HTTP 推理 + 管理、gRPC、Prometheus 指标），以基于文件系统的模型仓库为后端，支持模型的热加载与热卸载。
+
+```mermaid
+graph LR
+    A[Client] -->|HTTP / gRPC / WebSocket| B[LightServer]
+    B --> C[Model Registry]
+    B --> D[Inference Workers]
+    C --> E[Filesystem Model Repo]
+    D --> F[LitAPI Model]
+    B --> G[Prometheus Metrics]
+    B --> H[Web UI]
+```
+
+## 为什么选择 light-server？
+
+| | light-server | Triton | vLLM | BentoML |
+|---|---|---|---|---|
+| **定位** | 轻量多框架推理服务 | 全功能推理平台 | 仅 LLM | 全栈 MLOps |
+| **上手难度** | 一条命令启动 | 需要编译/复杂配置 | 需了解 GPU 调度 | 学习曲线陡峭 |
+| **模型框架** | PyTorch/TF/ONNX/任意 Python | TensorRT/ONNX/PyTorch | 仅 LLM | 多种后端 |
+| **协议支持** | HTTP + gRPC + WebSocket + 指标 | HTTP + gRPC + 多种协议 | HTTP + OpenAI API | HTTP + gRPC |
+| **模型管理** | 文件系统仓库 + 热加载/卸载 | 模型仓库 + 版本管理 | 单模型服务 | Bento 仓库 |
+| **批处理** | 自适应批处理 | 动态批处理 | Continuous Batching | 需配置 |
+| **资源占用** | 轻量，单进程起步 | 较重，多服务组件 | GPU 密集型 | 中等 |
+| **最佳场景** | 中小规模推理服务、快速迭代 | 大规模生产推理集群 | 大模型推理 | 端到端 MLOps |
+
+**light-server 的核心价值**：如果你需要一个能同时服务多个模型（不限于 LLM）、支持热更新、有监控指标、又能快速上手的推理服务器，light-server 是比 Triton 更轻、比 vLLM 更通用的选择。
 
 ## 特性
 
-- **多协议服务**：HTTP REST、gRPC 和 Prometheus 指标分别监听不同端口
+- **多协议服务**：HTTP REST、gRPC 和 Prometheus 指标分别监听不同端口，WebSocket 支持双向流式推理
 - **Triton 风格模型仓库**：基于文件系统的分层结构，支持版本化管理
 - **热加载/卸载**：通过管理 API 加载和卸载模型，无需重启服务
 - **批处理与流式**：每个模型可独立配置 `max_batch_size`、`batch_timeout` 和流式响应
@@ -17,6 +51,18 @@
 - **制品打包**：将模型目录打包为带签名的 `.lma` 制品，便于部署
 - **结构化日志**：支持 JSON/文本格式，按大小或时间轮转
 - **Web UI**：内置 Web 界面，用于模型管理与可观测性
+
+## 30 秒跑通
+
+```bash
+pip install light-server
+light-server init my_project && cd my_project
+light-server serve --config server.yaml
+# 另开终端
+curl -X POST http://127.0.0.1:8000/v2/models/my_model/infer \
+  -H "Content-Type: application/json" \
+  -d '{"input": "hello"}'
+```
 
 ## 安装
 
@@ -71,7 +117,7 @@ batch_timeout: 0.01
 stream: false
 ```
 
-### 2. 启动服务
+#### 2. 启动服务
 
 ```bash
 light-server serve --config server.yaml
@@ -107,7 +153,7 @@ load_models:
 light-server serve my_module:MyAPI --port 8000
 ```
 
-### 3. 发送推理请求
+#### 3. 发送推理请求
 
 ```bash
 curl -X POST http://127.0.0.1:8000/v2/models/test_model/infer \
@@ -115,7 +161,7 @@ curl -X POST http://127.0.0.1:8000/v2/models/test_model/infer \
   -d '{"input": 5.0}'
 ```
 
-### 4. 管理 API
+#### 4. 管理 API
 
 ```bash
 # 查看已加载模型
@@ -208,8 +254,11 @@ model_repo/
 |------|------|
 | [`01_quickstart`](examples/01_quickstart/) | 最简模型 — 启动、推理、管理 API |
 | [`02_advanced`](examples/02_advanced/) | 进阶特性 — 批处理 + 自定义指标 + 热重载 + 版本管理 |
-| [`03_ensemble`](examples/03_ensemble/) | 多模型流水线 — 预处理 + 推理 + Python 客户端 |
+| [`03_cv_pipeline`](examples/03_cv_pipeline/) | 真实 CV 流水线 — 图像预处理 + ResNet 分类 |
+| [`04_llm_streaming`](examples/04_llm_streaming/) | LLM 流式推理 — WebSocket 逐 token 生成 |
 | [`05_docker`](examples/05_docker/) | Docker 容器化部署 — Dockerfile + docker-compose |
+
+每个示例都包含 `run.sh` 一键运行脚本和 `test_model.py` 模型逻辑验证。
 
 ## 许可证
 

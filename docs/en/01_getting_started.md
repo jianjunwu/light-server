@@ -138,8 +138,32 @@ my_project/
         config.yaml
 ```
 
+## 30-Second Quickstart
+
+If you already have `light-server` installed, one command to start and test:
+
+```bash
+light-server init my_project && cd my_project
+light-server serve --config server.yaml
+# In another terminal
+curl -X POST http://127.0.0.1:8000/v2/models/my_model/infer \
+  -H "Content-Type: application/json" \
+  -d '{"input": "hello"}'
+```
+
+## Example Gallery
+
+| Example | Scenario | Features |
+|---------|----------|----------|
+| [`01_quickstart`](../../examples/01_quickstart/) | Echo model | Minimal inference + admin APIs |
+| [`02_advanced`](../../examples/02_advanced/) | Math operations | Batching + custom metrics + hot reload + versioning |
+| [`03_cv_pipeline`](../../examples/03_cv_pipeline/) | Image classification pipeline | Image preprocessing + ResNet classification |
+| [`04_llm_streaming`](../../examples/04_llm_streaming/) | LLM streaming generation | WebSocket token-by-token output |
+| [`05_docker`](../../examples/05_docker/) | Containerized deployment | Dockerfile + docker-compose |
+
+Each example includes a `run.sh` one-shot script and `test_model.py` for standalone model validation.
+
 ## Next Steps
 
 - [Configuration Guide](02_configuration.md)
 - [Model Development Guide](03_model_development.md)
-- [examples/](../../examples/) directory contains runnable examples

@@ -1,12 +1,48 @@
 # light-server
 
-Triton-style CLI deployment interface for [LitServe](https://github.com/Lightning-AI/litserve).
+English | [简体中文](README.md)
 
-`light-server` provides a multi-port inference server with HTTP (inference + admin), gRPC, and Prometheus metrics endpoints, backed by a filesystem-based model repository with hot-load/unload support.
+<p align="center">
+  <strong>As simple as a Flask API, as production-ready as Triton</strong>
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/light-server/"><img src="https://img.shields.io/pypi/v/light-server.svg" alt="PyPI"></a>
+  <a href="https://pypi.org/project/light-server/"><img src="https://img.shields.io/pypi/pyversions/light-server.svg" alt="Python"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+</p>
+
+`light-server` is a Triton-style CLI deployment interface for [LitServe](https://github.com/Lightning-AI/litserve). It provides a multi-port inference server with HTTP (inference + admin), gRPC, and Prometheus metrics endpoints, backed by a filesystem-based model repository with hot-load/unload support.
+
+```mermaid
+graph LR
+    A[Client] -->|HTTP / gRPC / WebSocket| B[LightServer]
+    B --> C[Model Registry]
+    B --> D[Inference Workers]
+    C --> E[Filesystem Model Repo]
+    D --> F[LitAPI Model]
+    B --> G[Prometheus Metrics]
+    B --> H[Web UI]
+```
+
+## Why light-server?
+
+| | light-server | Triton | vLLM | BentoML |
+|---|---|---|---|---|
+| **Positioning** | Lightweight multi-framework inference server | Full-featured inference platform | LLM only | Full-stack MLOps |
+| **Learning curve** | One command to start | Requires build/complex config | Needs GPU scheduling knowledge | Steep learning curve |
+| **Model frameworks** | PyTorch/TF/ONNX/any Python | TensorRT/ONNX/PyTorch | LLM only | Multiple backends |
+| **Protocols** | HTTP + gRPC + WebSocket + metrics | HTTP + gRPC + many protocols | HTTP + OpenAI API | HTTP + gRPC |
+| **Model management** | Filesystem repo + hot load/unload | Model repo + versioning | Single model service | Bento repo |
+| **Batching** | Adaptive batching | Dynamic batching | Continuous Batching | Requires config |
+| **Resource usage** | Lightweight, single process | Heavy, multi-service | GPU intensive | Medium |
+| **Best for** | Small-to-medium inference, rapid iteration | Large-scale production clusters | LLM inference | End-to-end MLOps |
+
+**The core value of light-server**: If you need a server that can serve multiple models (not just LLMs), supports hot updates, has monitoring metrics, and is quick to get started, light-server is lighter than Triton and more general-purpose than vLLM.
 
 ## Features
 
-- **Multi-protocol serving**: HTTP REST, gRPC, and Prometheus metrics on separate ports
+- **Multi-protocol serving**: HTTP REST, gRPC, and Prometheus metrics on separate ports; WebSocket for bidirectional streaming
 - **Triton-style model repository**: filesystem-based layout with versioned models
 - **Hot load/unload**: load and unload models via admin APIs without restarting the server
 - **Batching & streaming**: configure `max_batch_size`, `batch_timeout`, and streaming per model
@@ -15,6 +51,18 @@ Triton-style CLI deployment interface for [LitServe](https://github.com/Lightnin
 - **Artifact packaging**: pack/unpack models into signed `.lma` artifacts for deployment
 - **Structured logging**: JSON/text output with size/time-based rotation
 - **Web UI**: built-in web interface for model management and observability
+
+## 30-Second Quickstart
+
+```bash
+pip install light-server
+light-server init my_project && cd my_project
+light-server serve --config server.yaml
+# In another terminal
+curl -X POST http://127.0.0.1:8000/v2/models/my_model/infer \
+  -H "Content-Type: application/json" \
+  -d '{"input": "hello"}'
+```
 
 ## Install
 
@@ -69,7 +117,7 @@ batch_timeout: 0.01
 stream: false
 ```
 
-### 2. Start the server
+#### 2. Start the server
 
 ```bash
 light-server serve --config server.yaml
@@ -105,7 +153,7 @@ Or start inline without a config file:
 light-server serve my_module:MyAPI --port 8000
 ```
 
-### 3. Send an inference request
+#### 3. Send an inference request
 
 ```bash
 curl -X POST http://127.0.0.1:8000/v2/models/test_model/infer \
@@ -113,7 +161,7 @@ curl -X POST http://127.0.0.1:8000/v2/models/test_model/infer \
   -d '{"input": 5.0}'
 ```
 
-### 4. Admin APIs
+#### 4. Admin APIs
 
 ```bash
 # List loaded models
@@ -194,8 +242,11 @@ See the [`examples/`](examples/) directory for runnable examples:
 |---------|-------------|
 | [`01_quickstart`](examples/01_quickstart/) | Minimal model — serve, infer, admin APIs |
 | [`02_advanced`](examples/02_advanced/) | Batching + custom metrics + hot reload + versioning |
-| [`03_ensemble`](examples/03_ensemble/) | Multi-model pipeline — preprocess + predict + Python client |
+| [`03_cv_pipeline`](examples/03_cv_pipeline/) | Real CV pipeline — image preprocessing + ResNet classification |
+| [`04_llm_streaming`](examples/04_llm_streaming/) | LLM streaming inference — WebSocket token-by-token generation |
 | [`05_docker`](examples/05_docker/) | Docker containerized deployment — Dockerfile + docker-compose |
+
+Each example includes a `run.sh` one-shot script and `test_model.py` for standalone model validation.
 
 ## License
 

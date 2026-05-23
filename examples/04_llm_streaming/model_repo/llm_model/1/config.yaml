@@ -1,0 +1,8 @@
+name: llm_model
+api_path: /generate
+max_batch_size: 1
+batch_timeout: 0.0
+stream: true
+bidirectional: true
+accelerator: cpu
+workers_per_device: 1

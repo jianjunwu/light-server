@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import uuid
+from collections import deque
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from light_server.core.ensemble import EnsembleExecutor
 from light_server.core.server import LightServer
-from litserve.utils import LitAPIStatus, ResponseBufferItem
+from litserve.utils import LitAPIStatus, LoopResponseType, ResponseBufferItem
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,14 @@ def create_inference_routes(app: FastAPI, server: LightServer) -> None:
     async def infer_version(model_name: str, version: str, request: Request) -> JSONResponse:
         """Inference against a specific version of a model."""
         return await _do_infer(server, model_name, version, request)
+
+    @app.websocket("/v2/models/{model_name}/stream")
+    async def ws_stream(model_name: str, websocket: WebSocket) -> None:
+        await _do_ws_stream(server, model_name, None, websocket)
+
+    @app.websocket("/v2/models/{model_name}/versions/{version}/stream")
+    async def ws_stream_version(model_name: str, version: str, websocket: WebSocket) -> None:
+        await _do_ws_stream(server, model_name, version, websocket)
 
 
 async def _do_infer(server: LightServer, model_name: str, version: str | None, request: Request) -> JSONResponse:
@@ -137,6 +148,132 @@ async def _do_litapi_infer(
             server.system_metrics.dec_queue_depth(model_name, resolved_version)
 
 
+async def _do_ws_stream(
+    server: LightServer, model_name: str, version: str | None, websocket: WebSocket
+) -> None:
+    """Handle a bidirectional WebSocket stream."""
+    await websocket.accept()
+
+    resolved_version = version or server.registry.get_active_version(model_name) or "unknown"
+    server.system_metrics.record_request_start(model_name, resolved_version)
+
+    stream_id: str | None = None
+    status = "2xx"
+    try:
+        if not server.registry.is_ready(model_name, version):
+            status = "4xx"
+            await websocket.close(code=1011, reason=f"Model {model_name} not ready")
+            return
+
+        stream_id = f"ws-{uuid.uuid4().hex}"
+
+        event = asyncio.Event()
+        buffer_item = ResponseBufferItem(event=event, response_queue=deque())
+        server.response_buffer[stream_id] = buffer_item
+
+        server.model_manager.infer_stream_open(
+            model_name, stream_id, version=version, response_queue_id=0
+        )
+
+        sender_task = asyncio.create_task(
+            _ws_sender(websocket, buffer_item, stream_id),
+            name=f"ws-sender-{stream_id}",
+        )
+        receiver_task = asyncio.create_task(
+            _ws_receiver(websocket, server, model_name, stream_id, version),
+            name=f"ws-receiver-{stream_id}",
+        )
+
+        done, pending = await asyncio.wait(
+            [sender_task, receiver_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        for task in done:
+            exc = task.exception()
+            if exc is not None and not isinstance(exc, WebSocketDisconnect):
+                raise exc
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        status = "5xx"
+        logger.exception(f"WebSocket stream error for {model_name}: {e}")
+        try:
+            await websocket.close(code=1011, reason=str(e))
+        except Exception:
+            pass
+    finally:
+        if stream_id is not None:
+            try:
+                server.model_manager.infer_stream_close(model_name, stream_id, version=version)
+            except Exception:
+                pass
+            server.response_buffer.pop(stream_id, None)
+        server.system_metrics.record_request_end(model_name, resolved_version, status)
+
+
+async def _ws_sender(websocket: WebSocket, buffer_item: ResponseBufferItem, stream_id: str) -> None:
+    """Send output chunks from the response buffer to the WebSocket client."""
+    try:
+        while True:
+            await buffer_item.event.wait()
+            buffer_item.event.clear()
+
+            while buffer_item.response_queue:
+                response_data, status = buffer_item.response_queue.popleft()
+
+                if status == LitAPIStatus.FINISH_STREAMING:
+                    await websocket.close()
+                    return
+
+                if status == LitAPIStatus.ERROR:
+                    error_msg = str(response_data)
+                    if isinstance(response_data, Exception):
+                        error_msg = str(response_data)
+                    await websocket.send_json({"error": error_msg})
+                    await websocket.close(code=1011)
+                    return
+
+                if isinstance(response_data, bytes):
+                    await websocket.send_bytes(response_data)
+                elif isinstance(response_data, str):
+                    try:
+                        parsed = json.loads(response_data)
+                        await websocket.send_json(parsed)
+                    except json.JSONDecodeError:
+                        await websocket.send_text(response_data)
+                else:
+                    await websocket.send_json(response_data)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.warning(f"WebSocket sender error for stream {stream_id}: {e}")
+
+
+async def _ws_receiver(
+    websocket: WebSocket, server: LightServer, model_name: str, stream_id: str, version: str | None
+) -> None:
+    """Receive input chunks from the WebSocket client and forward to the worker."""
+    try:
+        while True:
+            message = await websocket.receive_json()
+            server.model_manager.infer_stream_chunk(
+                model_name, stream_id, message, version=version, response_queue_id=0
+            )
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.warning(f"WebSocket receiver error for stream {stream_id}: {e}")
+
+
 async def _response_consumer(server: LightServer) -> None:
     """Continuously read responses from transport and signal waiting handlers."""
     transport = server.transport
@@ -153,9 +290,13 @@ async def _response_consumer(server: LightServer) -> None:
             if response_item is None:
                 continue
 
-            response_item.response = (response_data, status)
-            response_item.worker_id = int(worker_id)
-            response_item.event.set()
+            if response_type == LoopResponseType.STREAMING and response_item.response_queue is not None:
+                response_item.response_queue.append((response_data, status))
+                response_item.event.set()
+            else:
+                response_item.response = (response_data, status)
+                response_item.worker_id = int(worker_id)
+                response_item.event.set()
 
         except asyncio.CancelledError:
             logger.debug("Response consumer cancelled")

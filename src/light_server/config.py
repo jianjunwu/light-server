@@ -72,6 +72,7 @@ class ModelConfig:
     accelerator: str | None = None
     devices: int | str | None = None
     workers_per_device: int | None = None
+    max_queue_size: int = 1000
 
 
 @dataclass

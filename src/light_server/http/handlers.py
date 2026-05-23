@@ -13,7 +13,9 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import JSONResponse
 
 from light_server.core.ensemble import EnsembleExecutor
+from light_server.core.model_manager import QueueFullError
 from light_server.core.server import LightServer
+from light_server.core.validation import validate_model_name, validate_version
 from litserve.utils import LitAPIStatus, LoopResponseType, ResponseBufferItem
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,13 @@ def create_inference_routes(app: FastAPI, server: LightServer) -> None:
 
 
 async def _do_infer(server: LightServer, model_name: str, version: str | None, request: Request) -> JSONResponse:
+    try:
+        validate_model_name(model_name)
+        if version is not None:
+            validate_version(version)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid model name or version: {exc}")
+
     resolved_version = version or server.registry.get_active_version(model_name) or "unknown"
     server.system_metrics.record_request_start(model_name, resolved_version)
 
@@ -131,6 +140,8 @@ async def _do_litapi_infer(
 
         return JSONResponse(response_data)
 
+    except QueueFullError as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
     except asyncio.TimeoutError:
         server.response_buffer.pop(uid, None)
         raise HTTPException(status_code=504, detail="Inference timeout")
@@ -152,6 +163,14 @@ async def _do_ws_stream(
     server: LightServer, model_name: str, version: str | None, websocket: WebSocket
 ) -> None:
     """Handle a bidirectional WebSocket stream."""
+    try:
+        validate_model_name(model_name)
+        if version is not None:
+            validate_version(version)
+    except ValueError as exc:
+        await websocket.close(code=1011, reason=f"Invalid model name or version: {exc}")
+        return
+
     await websocket.accept()
 
     resolved_version = version or server.registry.get_active_version(model_name) or "unknown"
@@ -171,9 +190,14 @@ async def _do_ws_stream(
         buffer_item = ResponseBufferItem(event=event, response_queue=deque())
         server.response_buffer[stream_id] = buffer_item
 
-        server.model_manager.infer_stream_open(
-            model_name, stream_id, version=version, response_queue_id=0
-        )
+        try:
+            server.model_manager.infer_stream_open(
+                model_name, stream_id, version=version, response_queue_id=0
+            )
+        except QueueFullError as exc:
+            server.response_buffer.pop(stream_id, None)
+            await websocket.close(code=1011, reason=str(exc))
+            return
         server.system_metrics.record_stream_open(model_name, resolved_version, "websocket", stream_id)
 
         sender_task = asyncio.create_task(

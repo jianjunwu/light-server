@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from light_server.core.server import LightServer
+from light_server.core.validation import validate_model_name, validate_version
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,12 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
     @app.get("/v2/models/{model_name}/ready")
     async def model_ready(model_name: str, version: str | None = Query(None)) -> JSONResponse:
         """Check if a model (or specific version) is ready."""
+        try:
+            validate_model_name(model_name)
+            if version is not None:
+                validate_version(version)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid model name or version: {exc}")
         ready = server.registry.is_ready(model_name, version)
         active_version = server.registry.get_active_version(model_name)
         return JSONResponse({
@@ -37,6 +44,10 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
     @app.get("/v2/models/{model_name}/versions")
     async def list_versions(model_name: str) -> JSONResponse:
         """List all loaded versions for a model."""
+        try:
+            validate_model_name(model_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid model name: {exc}")
         versions = server.registry.list_versions(model_name)
         active = server.registry.get_active_version(model_name)
         return JSONResponse({
@@ -54,6 +65,11 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
     @app.post("/v2/repository/models/{model_name}/load")
     async def load_model(model_name: str, version: str = Query("1")) -> JSONResponse:
         """Load a specific version of a model from the repository."""
+        try:
+            validate_model_name(model_name)
+            validate_version(version)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid model name or version: {exc}")
         success = server.model_manager.load(model_name, version=version)
         if success:
             return JSONResponse({
@@ -65,6 +81,12 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
     @app.post("/v2/repository/models/{model_name}/unload")
     async def unload_model(model_name: str, version: str | None = Query(None)) -> JSONResponse:
         """Unload a model. If version is specified, unload that version only."""
+        try:
+            validate_model_name(model_name)
+            if version is not None:
+                validate_version(version)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid model name or version: {exc}")
         success = server.model_manager.unload(model_name, version=version)
         if success:
             msg = f"Model {model_name}"
@@ -77,6 +99,11 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
     @app.post("/v2/models/{model_name}/versions/{version}/activate")
     async def activate_version(model_name: str, version: str) -> JSONResponse:
         """Activate a specific version for default inference routing."""
+        try:
+            validate_model_name(model_name)
+            validate_version(version)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid model name or version: {exc}")
         success = server.model_manager.activate(model_name, version)
         if success:
             return JSONResponse({

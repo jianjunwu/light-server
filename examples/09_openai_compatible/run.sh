@@ -18,14 +18,14 @@ SERVER_PID=$!
 
 echo -e "${BLUE}⏳ Step 3/4: 等待服务就绪...${NC}"
 for i in {1..30}; do
-    if curl -s http://127.0.0.1:8000/v2/models/llm_model/ready > /dev/null 2>&1; then
+    if curl -s http://127.0.0.1:8000/v2/models/hello_model/ready > /dev/null 2>&1; then
         break
     fi
     sleep 0.5
 done
 echo ""
 
-echo -e "${BLUE}🧪 Step 4/4: 运行 WebSocket 流式客户端...${NC}"
+echo -e "${BLUE}🧪 Step 4/4: 运行 OpenAI 格式适配演示...${NC}"
 echo ""
 python3 client.py
 

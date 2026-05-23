@@ -15,6 +15,43 @@ docker-compose.yml  # 容器编排
 Dockerfile          # 镜像构建
 ```
 
+## 🎯 30 秒体验
+
+```bash
+cd examples/05_docker
+./run.sh
+```
+
+> 本地预览模式（不依赖 Docker）。完整 Docker 部署见下方。
+
+## 📸 运行效果
+
+```
+🔧 Step 1/4: 验证模型逻辑...
+✅ Model logic test passed!
+
+🚀 Step 2/4: 启动 light-server (本地模式)...
+⏳ Step 3/4: 等待服务就绪...
+
+🧪 Step 4/4: 发送推理请求...
+
+--- 推理请求 ---
+{
+    "sentiment": "positive",
+    "score": 0.286,
+    "positive_words": 2,
+    "negative_words": 0
+}
+
+--- Prometheus 指标 ---
+lightserver_inference_duration_seconds_bucket{model="demo_model",le="0.01"} 1
+
+🛑 停止服务...
+✅ 完成！
+
+💡 Docker 部署: docker-compose up --build
+```
+
 ## 快速开始
 
 ### 1. 构建并启动

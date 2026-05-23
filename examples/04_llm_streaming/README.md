@@ -15,6 +15,43 @@ client.py              # WebSocket 流式客户端
 run.sh                 # 一键运行
 ```
 
+## 🎯 30 秒体验
+
+```bash
+cd examples/04_llm_streaming
+./run.sh
+```
+
+终端会自动完成：验证模型逻辑 → 启动服务 → 运行 WebSocket 流式客户端 → 停止服务。
+
+## 📸 运行效果
+
+```
+🔧 Step 1/4: 验证模型逻辑...
+✅ Model logic test passed!
+
+🚀 Step 2/4: 启动 light-server...
+⏳ Step 3/4: 等待服务就绪...
+
+🧪 Step 4/4: 运行 WebSocket 流式客户端...
+
+============================================================
+Prompt: Once upon a time
+Generated: Once upon a time , there was a young girl who
+loved to explore the world around her . She would spend
+hours wandering through the forests and meadows ...
+
+Total tokens: 32
+============================================================
+Prompt: The future of AI is
+Generated: The future of AI is bright and full of
+possibilities . With continued research and development ,
+we can expect to see even more innovative applications ...
+
+Total tokens: 28
+============================================================
+```
+
 ## 启动服务
 
 ```bash

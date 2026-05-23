@@ -20,6 +20,45 @@ run.sh                 # 一键运行
 test_model.py          # 模型逻辑验证
 ```
 
+## 🎯 30 秒体验
+
+```bash
+cd examples/03_cv_pipeline
+./run.sh
+```
+
+终端会自动完成：验证模型逻辑 → 启动服务 → 运行 CV 流水线客户端 → 停止服务。
+
+## 📸 运行效果
+
+```
+🔧 Step 1/4: 验证模型逻辑...
+✅ Model logic test passed!
+
+🚀 Step 2/4: 启动 light-server...
+⏳ Step 3/4: 等待服务就绪...
+
+🧪 Step 4/4: 运行 CV pipeline 客户端...
+
+========================================
+📷 Image Classification Pipeline
+========================================
+
+🔄 Step 1: Preprocessing...
+   Input:  256×256 RGB
+   Output: 224×224 normalized tensor
+
+🧠 Step 2: Classification...
+   Top-5 predictions:
+     1. class_281  (tabby cat)        0.1234
+     2. class_285  (Egyptian cat)      0.0987
+     3. class_282  (tiger cat)         0.0876
+     4. class_283  (Persian cat)       0.0654
+     5. class_287  (lynx)              0.0432
+
+✅ Pipeline complete!
+```
+
 ## 依赖
 
 ```bash

@@ -276,12 +276,15 @@ model_repo/
 
 | 示例 | 说明 |
 |------|------|
-| [`01_quickstart`](examples/01_quickstart/) | 最简模型 — 启动、推理、管理 API |
+| [`01_quickstart`](examples/01_quickstart/) | 智能文本增强 — 启动、推理、管理 API |
 | [`02_advanced`](examples/02_advanced/) | 进阶特性 — 批处理 + 自定义指标 + 热重载 + 版本管理 |
 | [`03_cv_pipeline`](examples/03_cv_pipeline/) | 真实 CV 流水线 — 图像预处理 + ResNet 分类 |
 | [`04_llm_streaming`](examples/04_llm_streaming/) | LLM 流式推理 — WebSocket 逐 token 生成 |
 | [`05_docker`](examples/05_docker/) | Docker 容器化部署 — Dockerfile + docker-compose |
 | [`06_text_classification`](examples/06_text_classification/) | 真实 NLP 分类 — DistilBERT 情感分析 + 自适应批处理 |
+| [`07_batching_speedup`](examples/07_batching_speedup/) | Batching 加速对比 — 用数据展示吞吐飞跃 |
+| [`08_grpc_client`](examples/08_grpc_client/) | gRPC 高性能调用 — 对比 HTTP REST 延迟 |
+| [`09_openai_compatible`](examples/09_openai_compatible/) | OpenAI 格式适配 — 响应实时转换 |
 
 每个示例都包含 `run.sh` 一键运行脚本和 `test_model.py` 模型逻辑验证。
 

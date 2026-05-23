@@ -15,6 +15,54 @@ test_model.py         # 不依赖 server，直接验证 model.py 逻辑
 run.sh                # 一键运行（测试 + 启动服务 + 客户端）
 ```
 
+## 🎯 30 秒体验
+
+```bash
+cd examples/06_text_classification
+./run.sh
+```
+
+终端会自动完成：验证模型逻辑 → 启动服务 → 运行单条 + 批量推理客户端 → 停止服务。
+
+## 📸 运行效果
+
+```
+🔧 Step 1/4: 验证模型逻辑...
+✅ Model logic test passed!
+
+🚀 Step 2/4: 启动 light-server...
+⏳ Step 3/4: 等待服务就绪...
+
+🧪 Step 4/4: 运行情感分析客户端...
+
+========================================
+📝 Single Inference
+========================================
+  Text:     I love this product!
+  Result:   POSITIVE (score: 0.9998)
+
+  Text:     This is terrible.
+  Result:   NEGATIVE (score: 0.9987)
+
+  Text:     The weather is okay.
+  Result:   NEUTRAL (score: 0.5123)
+
+========================================
+🚀 Batch Inference (6 texts, auto-batched)
+========================================
+  Batch size seen: 6
+  Results:
+    1. POSITIVE  (0.9998)
+    2. NEGATIVE  (0.9987)
+    3. NEUTRAL   (0.5123)
+    4. POSITIVE  (0.9876)
+    5. NEGATIVE  (0.9654)
+    6. POSITIVE  (0.9991)
+
+========================================
+✅ All tests passed!
+```
+
 ## 环境准备
 
 ```bash

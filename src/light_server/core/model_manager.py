@@ -68,7 +68,7 @@ class ModelManager:
         self._infer_counters: dict[str, int] = {}
         self._infer_counter_lock = threading.Lock()
         # Global lock for model load/unload/activate to prevent race conditions
-        self._model_lock = threading.Lock()
+        self._model_lock = threading.RLock()
 
     def _scan_plain_models(self, models: list[dict[str, Any]]) -> None:
         """Scan plain model subdirectories."""

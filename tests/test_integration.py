@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -10,10 +11,45 @@ import requests
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_server_startup_and_inference():
+def _make_server_config(repo_path: Path) -> str:
+    """Generate a server config YAML that points to the given model repo."""
+    return f"""
+grpc:
+  enabled: false
+load_models:
+- test_model
+metrics:
+  enabled: false
+model_repository:
+  control_mode: explicit
+  path: {repo_path}
+server:
+  grpc_port: 18001
+  host: 127.0.0.1
+  http_port: 18000
+  log_level: warning
+  metrics_port: 18002
+  num_api_servers: 1
+"""
+
+
+def test_server_startup_and_inference(isolated_model_repo):
     """E2E test: start server, call inference, call admin APIs, shutdown."""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".yaml", delete=False
+    ) as f:
+        f.write(_make_server_config(isolated_model_repo))
+        temp_config = f.name
+
     proc = subprocess.Popen(
-        [sys.executable, "-m", "light_server", "serve", "--config", "server.yaml"],
+        [
+            sys.executable,
+            "-m",
+            "light_server",
+            "serve",
+            "--config",
+            temp_config,
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -23,8 +59,8 @@ def test_server_startup_and_inference():
     try:
         # Wait for server startup by polling health endpoint
         base = "http://127.0.0.1:18000"
-        for _ in range(30):
-            time.sleep(0.5)
+        for _ in range(60):
+            time.sleep(0.2)
             try:
                 resp = requests.get(f"{base}/health", timeout=2)
                 if resp.status_code == 200:
@@ -33,7 +69,11 @@ def test_server_startup_and_inference():
                 continue
         else:
             # Print any server output for debugging
-            stdout_data = proc.stdout.read1().decode() if hasattr(proc.stdout, "read1") else ""
+            stdout_data = (
+                proc.stdout.read1().decode()
+                if hasattr(proc.stdout, "read1")
+                else ""
+            )
             print("Server output:", stdout_data)
             raise RuntimeError("Server did not start")
 
@@ -70,7 +110,9 @@ def test_server_startup_and_inference():
         assert resp.status_code in (200, 504)
 
         # Unload model
-        resp = requests.post(f"{base}/v2/repository/models/test_model/unload", timeout=5)
+        resp = requests.post(
+            f"{base}/v2/repository/models/test_model/unload", timeout=5
+        )
         assert resp.status_code == 200
 
         # Model should not be ready
@@ -78,7 +120,9 @@ def test_server_startup_and_inference():
         assert resp.json()["ready"] is False
 
         # Load model back
-        resp = requests.post(f"{base}/v2/repository/models/test_model/load", timeout=30)
+        resp = requests.post(
+            f"{base}/v2/repository/models/test_model/load", timeout=30
+        )
         assert resp.status_code == 200
 
         # Model should be ready
@@ -91,3 +135,7 @@ def test_server_startup_and_inference():
         proc.wait(timeout=10)
         if proc.poll() is None:
             proc.kill()
+        try:
+            Path(temp_config).unlink()
+        except OSError:
+            pass

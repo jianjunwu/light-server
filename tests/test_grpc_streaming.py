@@ -11,10 +11,10 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _start_server_with_grpc():
+def _start_server_with_grpc(repo_path: Path):
     """Start light-server with gRPC enabled and return (proc, temp_config_path, base_url, grpc_target)."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write("""
+        f.write(f"""
 grpc:
   enabled: true
   max_workers: 10
@@ -24,7 +24,7 @@ metrics:
   enabled: false
 model_repository:
   control_mode: explicit
-  path: ./model_repo
+  path: {repo_path}
 server:
   grpc_port: 18001
   host: 127.0.0.1
@@ -47,8 +47,8 @@ server:
     grpc_target = "127.0.0.1:18001"
 
     import requests
-    for _ in range(30):
-        time.sleep(0.5)
+    for _ in range(60):
+        time.sleep(0.2)
         try:
             resp = requests.get(f"{base}/health", timeout=2)
             if resp.status_code == 200:
@@ -77,9 +77,9 @@ def _cleanup(proc, temp_config):
         pass
 
 
-def test_grpc_predict():
+def test_grpc_predict(isolated_model_repo):
     """E2E test: gRPC unary Predict for test_model."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc()
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
     try:
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
@@ -111,9 +111,9 @@ def test_grpc_predict():
         _cleanup(proc, temp_config)
 
 
-def test_grpc_stream_predict():
+def test_grpc_stream_predict(isolated_model_repo):
     """E2E test: gRPC unary-stream StreamPredict for stream_model."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc()
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
     try:
         import grpc
         import requests
@@ -157,9 +157,9 @@ def test_grpc_stream_predict():
         _cleanup(proc, temp_config)
 
 
-def test_grpc_model_control():
+def test_grpc_model_control(isolated_model_repo):
     """E2E test: gRPC ModelControl (ready, load, unload)."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc()
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
     try:
         import grpc
         import requests
@@ -204,11 +204,10 @@ def test_grpc_model_control():
         _cleanup(proc, temp_config)
 
 
-def test_grpc_bidirectional_stream():
+def test_grpc_bidirectional_stream(isolated_model_repo):
     """E2E test: start server with gRPC enabled, connect via BidirectionalStream."""
-    # Use a temporary config with gRPC enabled
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write("""
+        f.write(f"""
 grpc:
   enabled: true
   max_workers: 10
@@ -218,7 +217,7 @@ metrics:
   enabled: false
 model_repository:
   control_mode: explicit
-  path: ./model_repo
+  path: {isolated_model_repo}
 server:
   grpc_port: 18001
   host: 127.0.0.1
@@ -242,8 +241,8 @@ server:
         grpc_target = "127.0.0.1:18001"
 
         import requests
-        for _ in range(30):
-            time.sleep(0.5)
+        for _ in range(60):
+            time.sleep(0.2)
             try:
                 resp = requests.get(f"{base}/health", timeout=2)
                 if resp.status_code == 200:
@@ -333,9 +332,9 @@ server:
             pass
 
 
-def test_grpc_predict_model_not_ready():
+def test_grpc_predict_model_not_ready(isolated_model_repo):
     """E2E test: gRPC Predict for unloaded model should return NOT_FOUND."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc()
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
     try:
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
@@ -359,9 +358,9 @@ def test_grpc_predict_model_not_ready():
         _cleanup(proc, temp_config)
 
 
-def test_grpc_stream_predict_model_not_ready():
+def test_grpc_stream_predict_model_not_ready(isolated_model_repo):
     """E2E test: gRPC StreamPredict for unloaded model should return NOT_FOUND."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc()
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
     try:
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
@@ -384,9 +383,9 @@ def test_grpc_stream_predict_model_not_ready():
         _cleanup(proc, temp_config)
 
 
-def test_grpc_bidirectional_stream_missing_model_name():
+def test_grpc_bidirectional_stream_missing_model_name(isolated_model_repo):
     """E2E test: BidirectionalStream first chunk without model_name should fail."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc()
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
     try:
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
@@ -414,9 +413,9 @@ def test_grpc_bidirectional_stream_missing_model_name():
         _cleanup(proc, temp_config)
 
 
-def test_grpc_bidirectional_stream_model_not_ready():
+def test_grpc_bidirectional_stream_model_not_ready(isolated_model_repo):
     """E2E test: BidirectionalStream for unloaded model should return NOT_FOUND."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc()
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
     try:
         import grpc
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
@@ -442,9 +441,9 @@ def test_grpc_bidirectional_stream_model_not_ready():
         _cleanup(proc, temp_config)
 
 
-def test_grpc_predict_invalid_json():
+def test_grpc_predict_invalid_json(isolated_model_repo):
     """E2E test: gRPC Predict with invalid JSON payload should return INVALID_ARGUMENT."""
-    proc, temp_config, base, grpc_target = _start_server_with_grpc()
+    proc, temp_config, base, grpc_target = _start_server_with_grpc(isolated_model_repo)
     try:
         import requests
         import grpc

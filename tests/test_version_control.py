@@ -14,7 +14,7 @@ from litserve.transport.factory import TransportConfig, create_transport_from_co
 from litserve.utils import LitAPIStatus
 
 
-def _create_test_env():
+def _create_test_env(repo_path: Path):
     """Create manager, registry, transport, and model manager for tests."""
     import multiprocessing as mp
     manager = mp.Manager()
@@ -24,33 +24,33 @@ def _create_test_env():
     transport_config.manager = manager
     transport = create_transport_from_config(transport_config)
 
-    repo = Path(__file__).parent.parent / "model_repo"
-    mm = ModelManager(repo, registry, transport=transport)
+    mm = ModelManager(repo_path, registry, transport=transport)
     return manager, registry, transport, mm
 
 
-def _write_model_config(content: str) -> None:
+def _write_model_config(repo_path: Path, content: str) -> None:
     """Helper to overwrite test_model/model_config.yaml."""
-    path = Path(__file__).parent.parent / "model_repo" / "test_model" / "model_config.yaml"
+    path = repo_path / "test_model" / "model_config.yaml"
     path.write_text(content)
 
 
-def _restore_model_config() -> None:
+def _restore_model_config(repo_path: Path) -> None:
     """Restore default test_model/model_config.yaml."""
     _write_model_config(
+        repo_path,
         'default_version: "1"\n'
         "load_policy: explicit\n"
         "versions_to_load:\n"
         '  - "1"\n'
         '  - "2"\n'
         "auto_activate_on_load: true\n"
-        "max_loaded_versions: 2\n"
+        "max_loaded_versions: 2\n",
     )
 
 
-def test_load_multiple_versions():
+def test_load_multiple_versions(isolated_model_repo):
     """Load v1 and v2 of the same model simultaneously."""
-    _m, registry, transport, mm = _create_test_env()
+    _m, registry, transport, mm = _create_test_env(isolated_model_repo)
 
     assert mm.load("test_model", version="1")
     assert mm.load("test_model", version="2")
@@ -78,9 +78,9 @@ def test_load_multiple_versions():
     mm.unload("test_model", version="2")
 
 
-def test_active_version_switching():
+def test_active_version_switching(isolated_model_repo):
     """Switch active version and verify default routing follows it."""
-    _m, registry, transport, mm = _create_test_env()
+    _m, registry, transport, mm = _create_test_env(isolated_model_repo)
 
     assert mm.load("test_model", version="1")
     assert mm.load("test_model", version="2")
@@ -103,9 +103,9 @@ def test_active_version_switching():
     mm.unload("test_model")
 
 
-def test_unload_specific_version():
+def test_unload_specific_version(isolated_model_repo):
     """Unload one version while keeping another loaded."""
-    _m, registry, transport, mm = _create_test_env()
+    _m, registry, transport, mm = _create_test_env(isolated_model_repo)
 
     assert mm.load("test_model", version="1")
     assert mm.load("test_model", version="2")
@@ -127,9 +127,9 @@ def test_unload_specific_version():
     mm.unload("test_model")
 
 
-def test_fallback_py_hot_reload():
+def test_fallback_py_hot_reload(isolated_model_repo):
     """Modify a .py file and verify fallback auto-reload works (v1 has no on_file_changed)."""
-    _m, registry, transport, mm = _create_test_env()
+    _m, registry, transport, mm = _create_test_env(isolated_model_repo)
 
     assert mm.load("test_model", version="1")
     time.sleep(2)
@@ -139,8 +139,8 @@ def test_fallback_py_hot_reload():
     result = transport._queues[0].get(timeout=10)
     assert result[1][0] == {"output": 25.0}
 
-    # Modify utils.py in v1
-    utils_path = Path(__file__).parent.parent / "model_repo" / "test_model" / "1" / "utils.py"
+    # Modify utils.py in v1 (isolated copy)
+    utils_path = isolated_model_repo / "test_model" / "1" / "utils.py"
     original = utils_path.read_text()
     try:
         utils_path.write_text(original.replace("x ** 2", "x ** 2 + 1"))
@@ -158,9 +158,9 @@ def test_fallback_py_hot_reload():
     mm.unload("test_model", version="1")
 
 
-def test_on_file_changed_callback():
+def test_on_file_changed_callback(isolated_model_repo):
     """v2 implements on_file_changed — verify it suppresses fallback reload."""
-    _m, registry, transport, mm = _create_test_env()
+    _m, registry, transport, mm = _create_test_env(isolated_model_repo)
 
     assert mm.load("test_model", version="2")
     time.sleep(2)
@@ -170,8 +170,8 @@ def test_on_file_changed_callback():
     result = transport._queues[0].get(timeout=10)
     assert result[1][0] == {"output": 125.0}
 
-    # Modify utils.py in v2
-    utils_path = Path(__file__).parent.parent / "model_repo" / "test_model" / "2" / "utils.py"
+    # Modify utils.py in v2 (isolated copy)
+    utils_path = isolated_model_repo / "test_model" / "2" / "utils.py"
     original = utils_path.read_text()
     try:
         utils_path.write_text(original.replace("x ** 3", "x ** 3 + 1"))
@@ -191,9 +191,9 @@ def test_on_file_changed_callback():
     mm.unload("test_model", version="2")
 
 
-def test_model_config_read():
+def test_model_config_read(isolated_model_repo):
     """Verify get_model_config reads model_config.yaml correctly."""
-    _m, _r, _t, mm = _create_test_env()
+    _m, _r, _t, mm = _create_test_env(isolated_model_repo)
     cfg = mm.get_model_config("test_model")
     assert cfg["default_version"] == "1"
     assert cfg["load_policy"] == "explicit"
@@ -201,15 +201,16 @@ def test_model_config_read():
     assert cfg["max_loaded_versions"] == 2
 
 
-def test_model_config_default_version():
+def test_model_config_default_version(isolated_model_repo):
     """default_version is activated even when another version loads first."""
     _write_model_config(
+        isolated_model_repo,
         'default_version: "2"\n'
         "load_policy: all\n"
-        "auto_activate_on_load: true\n"
+        "auto_activate_on_load: true\n",
     )
     try:
-        _m, registry, _t, mm = _create_test_env()
+        _m, registry, _t, mm = _create_test_env(isolated_model_repo)
         # Load v1 first
         assert mm.load("test_model", version="1")
         time.sleep(2)
@@ -224,18 +225,19 @@ def test_model_config_default_version():
 
         mm.unload("test_model")
     finally:
-        _restore_model_config()
+        _restore_model_config(isolated_model_repo)
 
 
-def test_model_config_max_loaded_versions():
+def test_model_config_max_loaded_versions(isolated_model_repo):
     """Loading beyond max_loaded_versions evicts the oldest version."""
     _write_model_config(
+        isolated_model_repo,
         'default_version: "1"\n'
         "load_policy: all\n"
-        "max_loaded_versions: 1\n"
+        "max_loaded_versions: 1\n",
     )
     try:
-        _m, registry, _t, mm = _create_test_env()
+        _m, registry, _t, mm = _create_test_env(isolated_model_repo)
         assert mm.load("test_model", version="1")
         time.sleep(2)
         assert registry.is_ready("test_model", "1")
@@ -248,4 +250,4 @@ def test_model_config_max_loaded_versions():
 
         mm.unload("test_model")
     finally:
-        _restore_model_config()
+        _restore_model_config(isolated_model_repo)

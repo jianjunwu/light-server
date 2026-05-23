@@ -63,7 +63,36 @@ class SystemMetrics:
             ["model", "version"],
             registry=registry,
         )
+        # Streaming metrics
+        self.streaming_connections = Gauge(
+            "lightserver_streaming_connections",
+            "Active bidirectional streaming connections",
+            ["model", "version", "protocol"],
+            registry=registry,
+        )
+        self.streaming_ttft = Histogram(
+            "lightserver_streaming_ttft_seconds",
+            "Time to first token in streaming",
+            ["model", "version", "protocol"],
+            buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5],
+            registry=registry,
+        )
+        self.streaming_tbt = Histogram(
+            "lightserver_streaming_tbt_seconds",
+            "Time between tokens in streaming",
+            ["model", "version", "protocol"],
+            buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5],
+            registry=registry,
+        )
+        self.streaming_chunks_total = Counter(
+            "lightserver_streaming_chunks_total",
+            "Total streaming output chunks",
+            ["model", "version", "protocol"],
+            registry=registry,
+        )
         self._request_start_times: dict[str, float] = {}
+        self._stream_first_token_times: dict[str, float] = {}
+        self._stream_last_token_times: dict[str, float] = {}
 
         # UI-friendly sliding window data (not Prometheus metrics)
         self._latency_window: deque[tuple[float, float]] = deque(maxlen=2000)
@@ -116,6 +145,42 @@ class SystemMetrics:
 
     def set_active_workers(self, model: str, version: str, count: int) -> None:
         self.active_workers.labels(model=model, version=version).set(count)
+
+    # ------------------------------------------------------------------
+    # Streaming metrics
+    # ------------------------------------------------------------------
+
+    def record_stream_open(self, model: str, version: str, protocol: str, stream_id: str) -> None:
+        self.streaming_connections.labels(model=model, version=version, protocol=protocol).inc()
+        self._stream_first_token_times[stream_id] = 0.0
+        self._stream_last_token_times[stream_id] = 0.0
+
+    def record_stream_chunk(
+        self, model: str, version: str, protocol: str, stream_id: str
+    ) -> None:
+        now = time.time()
+        self.streaming_chunks_total.labels(model=model, version=version, protocol=protocol).inc()
+
+        first_time = self._stream_first_token_times.get(stream_id, 0.0)
+        if first_time == 0.0:
+            # First chunk: record TTFT relative to request start
+            start = self._request_start_times.pop(f"{model}_{version}", None)
+            if start is not None:
+                ttft = now - start
+                self.streaming_ttft.labels(model=model, version=version, protocol=protocol).observe(ttft)
+            self._stream_first_token_times[stream_id] = now
+        else:
+            # Subsequent chunk: record TBT
+            last = self._stream_last_token_times.get(stream_id, first_time)
+            tbt = now - last
+            self.streaming_tbt.labels(model=model, version=version, protocol=protocol).observe(tbt)
+
+        self._stream_last_token_times[stream_id] = now
+
+    def record_stream_close(self, model: str, version: str, protocol: str, stream_id: str) -> None:
+        self.streaming_connections.labels(model=model, version=version, protocol=protocol).dec()
+        self._stream_first_token_times.pop(stream_id, None)
+        self._stream_last_token_times.pop(stream_id, None)
 
     # ------------------------------------------------------------------
     # UI query helpers (sliding window data)

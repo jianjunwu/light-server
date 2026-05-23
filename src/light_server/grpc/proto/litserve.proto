@@ -5,6 +5,7 @@ package lightserver;
 service Inference {
   rpc Predict(PredictRequest) returns (PredictResponse);
   rpc StreamPredict(PredictRequest) returns (stream PredictResponse);
+  rpc BidirectionalStream(stream StreamChunk) returns (stream StreamChunk);
 }
 
 service ModelControl {
@@ -18,14 +19,22 @@ message PredictRequest {
   string model_name = 1;
   bytes payload = 2;
   map<string, string> metadata = 3;
+  string version = 4;
 }
 
 message PredictResponse {
   bytes payload = 1;
 }
 
+message StreamChunk {
+  string stream_id = 1;
+  bytes payload = 2;
+  bool is_final = 3;
+}
+
 message ModelReadyRequest {
   string model_name = 1;
+  string version = 2;
 }
 
 message ModelReadyResponse {
@@ -34,10 +43,12 @@ message ModelReadyResponse {
 
 message LoadModelRequest {
   string model_name = 1;
+  string version = 2;
 }
 
 message UnloadModelRequest {
   string model_name = 1;
+  string version = 2;
 }
 
 message StatusResponse {

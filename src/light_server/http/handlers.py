@@ -174,9 +174,10 @@ async def _do_ws_stream(
         server.model_manager.infer_stream_open(
             model_name, stream_id, version=version, response_queue_id=0
         )
+        server.system_metrics.record_stream_open(model_name, resolved_version, "websocket", stream_id)
 
         sender_task = asyncio.create_task(
-            _ws_sender(websocket, buffer_item, stream_id),
+            _ws_sender(websocket, buffer_item, stream_id, server, model_name, resolved_version),
             name=f"ws-sender-{stream_id}",
         )
         receiver_task = asyncio.create_task(
@@ -212,6 +213,7 @@ async def _do_ws_stream(
             pass
     finally:
         if stream_id is not None:
+            server.system_metrics.record_stream_close(model_name, resolved_version, "websocket", stream_id)
             try:
                 server.model_manager.infer_stream_close(model_name, stream_id, version=version)
             except Exception:
@@ -220,7 +222,14 @@ async def _do_ws_stream(
         server.system_metrics.record_request_end(model_name, resolved_version, status)
 
 
-async def _ws_sender(websocket: WebSocket, buffer_item: ResponseBufferItem, stream_id: str) -> None:
+async def _ws_sender(
+    websocket: WebSocket,
+    buffer_item: ResponseBufferItem,
+    stream_id: str,
+    server: LightServer,
+    model_name: str,
+    version: str,
+) -> None:
     """Send output chunks from the response buffer to the WebSocket client."""
     try:
         while True:
@@ -241,6 +250,8 @@ async def _ws_sender(websocket: WebSocket, buffer_item: ResponseBufferItem, stre
                     await websocket.send_json({"error": error_msg})
                     await websocket.close(code=1011)
                     return
+
+                server.system_metrics.record_stream_chunk(model_name, version, "websocket", stream_id)
 
                 if isinstance(response_data, bytes):
                     await websocket.send_bytes(response_data)

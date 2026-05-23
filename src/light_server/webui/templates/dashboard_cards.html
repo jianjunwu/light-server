@@ -6,6 +6,8 @@
   </div>
   <div class="meta">
     Active: {{ model.active_version or '-' }} | Type: {{ model.model_type or 'litapi' }}
+    {% if model.stream %}| <span style="color:#2563eb;">Stream</span>{% endif %}
+    {% if model.bidirectional %}| <span style="color:#16a34a;">Bi-dir</span>{% endif %}
   </div>
   <div class="metric-grid" style="margin:0.5rem 0;">
     <div class="metric-card">

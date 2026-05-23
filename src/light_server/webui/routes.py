@@ -68,6 +68,9 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
             version = entry.get("version", m.get("version", "1"))
             model_type = entry.get("model_type", "litapi")
             active = server.registry.get_active_version(name)
+            config = entry.get("config", {})
+            stream = config.get("stream", False)
+            bidirectional = config.get("bidirectional", False)
             workers = 0
             if status == "READY":
                 try:
@@ -92,6 +95,8 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
                 "qps": qps,
                 "p99_ms": p99_ms,
                 "queue_depth": queue_depth,
+                "stream": stream,
+                "bidirectional": bidirectional,
             })
         return models
 
@@ -307,6 +312,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
         concurrency: int = Form(8),
         duration: float = Form(30.0),
         payload: str = Form('{"input": 1.0}'),
+        protocol: str = Form("http"),
     ) -> HTMLResponse:
         global _benchmark_running
         if _benchmark_running:
@@ -327,6 +333,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
                 concurrency=concurrency,
                 duration=duration,
                 payload=payload,
+                protocol=protocol,
                 server=server,
                 store=report_store,
             )
@@ -489,6 +496,7 @@ async def _run_benchmark_job(
     concurrency: int,
     duration: float,
     payload: str,
+    protocol: str,
     server: Any,
     store: BenchmarkReportStore,
 ) -> None:
@@ -496,23 +504,39 @@ async def _run_benchmark_job(
     try:
         _job_store[job_id] = {"status": "running", "progress": 5}
         port = server.config.server.http_port
-        target = HttpBenchmarkTarget(
-            base_url=f"http://127.0.0.1:{port}",
-            model_name=model,
-            version=version if version != "1" else None,
-        )
-
-        _job_store[job_id]["progress"] = 10
         parsed_payload = json.loads(payload) if payload else {"input": 1.0}
-        engine = BenchmarkEngine()
-        result = await engine.run(
-            target=target,
-            payload=parsed_payload,
-            mode=mode,  # type: ignore[arg-type]
-            concurrency=concurrency,
-            duration=duration,
-        )
-        await target.close()
+
+        if protocol == "websocket":
+            from light_server.analyzer.benchmark import StreamingBenchmarkEngine, WebSocketStreamingTarget
+            target = WebSocketStreamingTarget(
+                base_url=f"http://127.0.0.1:{port}",
+                model_name=model,
+                version=version if version != "1" else None,
+            )
+            engine = StreamingBenchmarkEngine()
+            result = await engine.run(
+                target=target,
+                payload=parsed_payload,
+                mode=mode,  # type: ignore[arg-type]
+                concurrency=concurrency,
+                duration=duration,
+            )
+        else:
+            target = HttpBenchmarkTarget(
+                base_url=f"http://127.0.0.1:{port}",
+                model_name=model,
+                version=version if version != "1" else None,
+            )
+            _job_store[job_id]["progress"] = 10
+            engine = BenchmarkEngine()
+            result = await engine.run(
+                target=target,
+                payload=parsed_payload,
+                mode=mode,  # type: ignore[arg-type]
+                concurrency=concurrency,
+                duration=duration,
+            )
+            await target.close()
 
         _job_store[job_id]["progress"] = 90
         report_id = store.save(

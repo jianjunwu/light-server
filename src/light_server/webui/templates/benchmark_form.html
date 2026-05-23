@@ -40,6 +40,12 @@
     <label>Payload (JSON)
       <input type="text" name="payload" value='{"input": 1.0}'>
     </label>
+    <label>Protocol
+      <select name="protocol">
+        <option value="http" selected>HTTP (one-shot)</option>
+        <option value="websocket">WebSocket (streaming)</option>
+      </select>
+    </label>
   </div>
   <button type="submit">Start Benchmark</button>
 </form>

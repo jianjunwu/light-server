@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-import litserve_pb2 as litserve__pb2
+from . import litserve_pb2 as litserve__pb2
 
 GRPC_GENERATED_VERSION = '1.80.0'
 GRPC_VERSION = grpc.__version__
@@ -44,6 +44,11 @@ class InferenceStub(object):
                 request_serializer=litserve__pb2.PredictRequest.SerializeToString,
                 response_deserializer=litserve__pb2.PredictResponse.FromString,
                 _registered_method=True)
+        self.BidirectionalStream = channel.stream_stream(
+                '/lightserver.Inference/BidirectionalStream',
+                request_serializer=litserve__pb2.StreamChunk.SerializeToString,
+                response_deserializer=litserve__pb2.StreamChunk.FromString,
+                _registered_method=True)
 
 
 class InferenceServicer(object):
@@ -61,6 +66,12 @@ class InferenceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def BidirectionalStream(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_InferenceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -73,6 +84,11 @@ def add_InferenceServicer_to_server(servicer, server):
                     servicer.StreamPredict,
                     request_deserializer=litserve__pb2.PredictRequest.FromString,
                     response_serializer=litserve__pb2.PredictResponse.SerializeToString,
+            ),
+            'BidirectionalStream': grpc.stream_stream_rpc_method_handler(
+                    servicer.BidirectionalStream,
+                    request_deserializer=litserve__pb2.StreamChunk.FromString,
+                    response_serializer=litserve__pb2.StreamChunk.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -129,6 +145,33 @@ class Inference(object):
             '/lightserver.Inference/StreamPredict',
             litserve__pb2.PredictRequest.SerializeToString,
             litserve__pb2.PredictResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def BidirectionalStream(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/lightserver.Inference/BidirectionalStream',
+            litserve__pb2.StreamChunk.SerializeToString,
+            litserve__pb2.StreamChunk.FromString,
             options,
             channel_credentials,
             insecure,

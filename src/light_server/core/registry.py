@@ -32,6 +32,7 @@ class ModelRegistry:
         self._lock = threading.Lock()
         self._registry: dict[str, dict[str, Any]] = {}
         self._queues: dict[str, Any] = {}
+        self._worker_queues: dict[str, list[Any]] = {}  # model_key -> list of per-worker queues
         self._active_versions: dict[str, str] = {}
 
     @staticmethod
@@ -61,6 +62,28 @@ class ModelRegistry:
                     return None
             return self._queues.get(self._key(name, version))
 
+    def set_worker_queues(self, name: str, version: str, queues: list[Any]) -> None:
+        """Store per-worker request queues for a model version."""
+        with self._lock:
+            self._worker_queues[self._key(name, version)] = queues
+
+    def get_worker_queue(self, name: str, version: str, worker_id: int) -> Any:
+        """Get a specific worker's request queue."""
+        with self._lock:
+            queues = self._worker_queues.get(self._key(name, version))
+            if queues is None or worker_id >= len(queues):
+                return None
+            return queues[worker_id]
+
+    def get_worker_queues(self, name: str, version: str | None = None) -> list[Any] | None:
+        """Get all per-worker request queues for a model version."""
+        with self._lock:
+            if version is None:
+                version = self._active_versions.get(name)
+                if version is None:
+                    return None
+            return self._worker_queues.get(self._key(name, version))
+
     def set_status(self, name: str, version: str, status: str) -> None:
         key = self._key(name, version)
         with self._lock:
@@ -81,6 +104,7 @@ class ModelRegistry:
         with self._lock:
             self._registry.pop(key, None)
             self._queues.pop(key, None)
+            self._worker_queues.pop(key, None)
 
     def list_loaded(self) -> list[dict[str, Any]]:
         with self._lock:

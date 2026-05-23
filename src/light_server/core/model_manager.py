@@ -52,6 +52,14 @@ class ModelManager:
         self._uid_lock = threading.Lock()
         # Shared memory buffer for zero-copy transport of large payloads
         self._shm_buffer = ShmPayloadBuffer(threshold_bytes=4096)
+        # Stream routing: stream_id -> worker_id for sticky routing
+        self._stream_routing: dict[str, int] = {}
+        self._stream_lock = threading.Lock()
+        # Worker load tracking: model_key -> {worker_id: active_stream_count}
+        self._worker_loads: dict[str, dict[int, int]] = {}
+        # Round-robin counter for regular requests
+        self._infer_counters: dict[str, int] = {}
+        self._infer_counter_lock = threading.Lock()
 
     def _scan_plain_models(self, models: list[dict[str, Any]]) -> None:
         """Scan plain model subdirectories."""
@@ -229,11 +237,21 @@ class ModelManager:
             lit_api.config = model_config
             lit_api.pre_setup()
 
-            request_queue = mp.Queue()
-            self.registry.set_queue(name, version, request_queue)
+            accelerator = model_config.get("accelerator", "cpu")
+            devices = model_config.get("devices", 1)
+            workers_per_device = model_config.get("workers_per_device", 1)
+            if isinstance(devices, str) and devices == "auto":
+                devices = 1
+            if not isinstance(devices, int):
+                devices = 1
+            total_workers = devices * workers_per_device
+            worker_queues = [mp.Queue() for _ in range(total_workers)]
+            self.registry.set_worker_queues(name, version, worker_queues)
+            # Backward-compat: also set the legacy single queue (points to worker 0)
+            self.registry.set_queue(name, version, worker_queues[0])
 
             workers = self._launch_workers(
-                name, version, str(model_py), model_config, request_queue
+                name, version, str(model_py), model_config, worker_queues
             )
             key = self._worker_key(name, version)
             self._workers[key] = workers
@@ -294,7 +312,16 @@ class ModelManager:
         self.registry.set_status(name, version, "UNLOADING")
 
         if not is_ensemble:
-            # Close the request queue to release pipe file descriptors
+            # Close all per-worker request queues
+            worker_queues = self.registry.get_worker_queues(name, version)
+            if worker_queues:
+                for q in worker_queues:
+                    try:
+                        q.close()
+                        q.join_thread()
+                    except Exception as e:
+                        logger.warning(f"Error closing queue for {name} v{version}: {e}")
+            # Also close the legacy single queue if it wasn't in worker_queues
             queue = self.registry.get_queue(name, version)
             if queue is not None:
                 try:
@@ -302,6 +329,15 @@ class ModelManager:
                     queue.join_thread()
                 except Exception as e:
                     logger.warning(f"Error closing queue for {name} v{version}: {e}")
+
+            # Clean up stream routing and worker loads for this model
+            self._worker_loads.pop(key, None)
+            with self._stream_lock:
+                self._stream_routing = {
+                    sid: wid for sid, wid in self._stream_routing.items()
+                    if not sid.startswith(f"{key}-")
+                }
+            self._infer_counters.pop(key, None)
 
             for worker in self._workers.get(key, []):
                 try:
@@ -365,6 +401,30 @@ class ModelManager:
         logger.info(f"Model {name} version {version} unloaded")
         return True
 
+    def _next_uid(self, name: str, version: str) -> str:
+        """Generate a unique request id."""
+        key = self._worker_key(name, version)
+        with self._uid_lock:
+            if key not in self._uid_counters:
+                self._uid_counters[key] = itertools.count()
+            seq = next(self._uid_counters[key])
+        return f"{key}-{seq}-{time.monotonic_ns() & 0xFFFFFFFF:08x}"
+
+    def _pick_worker_round_robin(self, key: str, num_workers: int) -> int:
+        """Round-robin worker selection for regular requests."""
+        with self._infer_counter_lock:
+            counter = self._infer_counters.get(key, 0)
+            worker_id = counter % num_workers
+            self._infer_counters[key] = counter + 1
+            return worker_id
+
+    def _pick_worker_least_loaded(self, key: str) -> int:
+        """Pick the worker with the fewest active streams."""
+        loads = self._worker_loads.get(key, {})
+        if not loads:
+            return 0
+        return min(loads, key=loads.get)
+
     def infer(self, name: str, payload: dict[str, Any], version: str | None = None, response_queue_id: int = 0) -> str:
         """Submit an inference request for a model. Returns request uid."""
         if version is None:
@@ -375,23 +435,32 @@ class ModelManager:
         if not self.registry.is_ready(name, version):
             raise RuntimeError(f"Model {name} version {version} is not ready")
 
-        queue = self.registry.get_queue(name, version)
-        if queue is None:
-            raise RuntimeError(f"Model {name} version {version} has no request queue")
+        worker_queues = self.registry.get_worker_queues(name, version)
+        if worker_queues is None:
+            # Fallback: backward compat for tests that only set a single queue
+            queue = self.registry.get_queue(name, version)
+            if queue is None:
+                raise RuntimeError(f"Model {name} version {version} has no request queues")
+            if self.system_metrics:
+                self.system_metrics.inc_queue_depth(name, version)
+            uid = self._next_uid(name, version)
+            entry = self.registry.get(name, version)
+            max_batch_size = (entry.get("config") or {}).get("max_batch_size", 1) if entry else 1
+            if max_batch_size > 1:
+                mode, data = self._shm_buffer.offload(payload)
+                queue.put((response_queue_id, uid, time.monotonic(), (mode, data)))
+            else:
+                queue.put((response_queue_id, uid, time.monotonic(), payload))
+            return uid
 
         if self.system_metrics:
             self.system_metrics.inc_queue_depth(name, version)
 
-        # Atomic integer uid: avoids uuid4() overhead under high QPS
         key = self._worker_key(name, version)
-        with self._uid_lock:
-            if key not in self._uid_counters:
-                self._uid_counters[key] = itertools.count()
-            seq = next(self._uid_counters[key])
-        # Use hyphen separator to avoid ambiguity when model names contain underscores
-        uid = f"{key}-{seq}-{time.monotonic_ns() & 0xFFFFFFFF:08x}"
-        # Zero-copy: only wrap payload for batched models (AdaptiveBatchedLoop
-        # knows how to unwrap).  SingleLoop models pass payload directly.
+        worker_id = self._pick_worker_round_robin(key, len(worker_queues))
+        queue = worker_queues[worker_id]
+
+        uid = self._next_uid(name, version)
         entry = self.registry.get(name, version)
         max_batch_size = (entry.get("config") or {}).get("max_batch_size", 1) if entry else 1
         if max_batch_size > 1:
@@ -400,6 +469,99 @@ class ModelManager:
         else:
             queue.put((response_queue_id, uid, time.monotonic(), payload))
         return uid
+
+    def infer_stream_open(self, name: str, stream_id: str, version: str | None = None, response_queue_id: int = 0) -> int:
+        """Open a bidirectional stream. Returns the assigned worker_id."""
+        if version is None:
+            version = self.registry.get_active_version(name)
+            if version is None:
+                raise RuntimeError(f"Model {name} has no active version")
+
+        if not self.registry.is_ready(name, version):
+            raise RuntimeError(f"Model {name} version {version} is not ready")
+
+        worker_queues = self.registry.get_worker_queues(name, version)
+        if worker_queues is None:
+            raise RuntimeError(f"Model {name} version {version} has no request queues")
+
+        key = self._worker_key(name, version)
+        worker_id = self._pick_worker_least_loaded(key)
+        with self._stream_lock:
+            self._stream_routing[stream_id] = worker_id
+
+        loads = self._worker_loads.setdefault(key, {})
+        loads[worker_id] = loads.get(worker_id, 0) + 1
+
+        queue = worker_queues[worker_id]
+        uid = self._next_uid(name, version)
+        payload = {"_stream_meta": {"msg_type": "STREAM_OPEN", "stream_id": stream_id}}
+        queue.put((response_queue_id, uid, time.monotonic(), payload))
+        return worker_id
+
+    def infer_stream_chunk(self, name: str, stream_id: str, chunk: dict[str, Any], version: str | None = None, response_queue_id: int = 0) -> str:
+        """Send a chunk into an active bidirectional stream."""
+        if version is None:
+            version = self.registry.get_active_version(name)
+
+        worker_id = self._stream_routing.get(stream_id)
+        if worker_id is None:
+            raise RuntimeError(f"Stream {stream_id} is not open")
+
+        worker_queues = self.registry.get_worker_queues(name, version)
+        if worker_queues is None or worker_id >= len(worker_queues):
+            raise RuntimeError(f"Model {name} worker queues unavailable")
+
+        queue = worker_queues[worker_id]
+        uid = self._next_uid(name, version)
+        payload = {"_stream_meta": {"msg_type": "STREAM_CHUNK", "stream_id": stream_id}, **chunk}
+        queue.put((response_queue_id, uid, time.monotonic(), payload))
+        return uid
+
+    def infer_stream_close(self, name: str, stream_id: str, version: str | None = None, response_queue_id: int = 0) -> None:
+        """Close a bidirectional stream."""
+        if version is None:
+            version = self.registry.get_active_version(name)
+
+        worker_id = self._stream_routing.pop(stream_id, None)
+        if worker_id is None:
+            return
+
+        key = self._worker_key(name, version) if version else None
+        if key:
+            loads = self._worker_loads.get(key, {})
+            loads[worker_id] = max(0, loads.get(worker_id, 0) - 1)
+
+        worker_queues = self.registry.get_worker_queues(name, version)
+        if worker_queues is None or worker_id >= len(worker_queues):
+            return
+
+        queue = worker_queues[worker_id]
+        uid = self._next_uid(name, version)
+        payload = {"_stream_meta": {"msg_type": "STREAM_CLOSE", "stream_id": stream_id}}
+        queue.put((response_queue_id, uid, time.monotonic(), payload))
+
+    def infer_stream_cancel(self, name: str, stream_id: str, version: str | None = None, response_queue_id: int = 0) -> None:
+        """Cancel a bidirectional stream immediately."""
+        if version is None:
+            version = self.registry.get_active_version(name)
+
+        worker_id = self._stream_routing.pop(stream_id, None)
+        if worker_id is None:
+            return
+
+        key = self._worker_key(name, version) if version else None
+        if key:
+            loads = self._worker_loads.get(key, {})
+            loads[worker_id] = max(0, loads.get(worker_id, 0) - 1)
+
+        worker_queues = self.registry.get_worker_queues(name, version)
+        if worker_queues is None or worker_id >= len(worker_queues):
+            return
+
+        queue = worker_queues[worker_id]
+        uid = self._next_uid(name, version)
+        payload = {"_stream_meta": {"msg_type": "STREAM_CANCEL", "stream_id": stream_id}}
+        queue.put((response_queue_id, uid, time.monotonic(), payload))
 
     def activate(self, name: str, version: str) -> bool:
         """Activate a specific version for default routing."""
@@ -457,6 +619,8 @@ class ModelManager:
                 config["api_path"] = override.api_path
             if override.stream:
                 config["stream"] = override.stream
+            if override.bidirectional:
+                config["bidirectional"] = override.bidirectional
             if override.accelerator:
                 config["accelerator"] = override.accelerator
             if override.devices is not None:
@@ -466,7 +630,7 @@ class ModelManager:
 
         return config
 
-    def _launch_workers(self, name: str, version: str, model_py_path: str, config: dict[str, Any], request_queue: Any) -> list[mp.Process]:
+    def _launch_workers(self, name: str, version: str, model_py_path: str, config: dict[str, Any], worker_queues: list[Any]) -> list[mp.Process]:
         """Launch inference worker processes for a model version."""
         workers = []
         accelerator = config.get("accelerator", "cpu")
@@ -495,7 +659,7 @@ class ModelManager:
             ctx = mp.get_context("spawn")
             p = ctx.Process(
                 target=_inference_worker_wrapper,
-                args=(name, version, model_py_path, config, device, worker_id, request_queue, self.transport, workers_setup_status, self.log_queue),
+                args=(name, version, model_py_path, config, device, worker_id, worker_queues[worker_id], self.transport, workers_setup_status, self.log_queue),
                 name=f"inference-worker-{name}-{version}-{worker_id}",
             )
             p.start()

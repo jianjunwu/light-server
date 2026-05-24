@@ -23,9 +23,10 @@ class MyAPI(LitAPI):
         return {"text": text}
 
     def predict(self, x, **kwargs):
-        """Run text classification."""
-        result = self.model(x["text"])
-        return result
+        """Run text classification. x is a list when batching is enabled."""
+        if isinstance(x, list):
+            return [self.model(item["text"]) for item in x]
+        return self.model(x["text"])
 
     def encode_response(self, output):
         """Format classification result."""

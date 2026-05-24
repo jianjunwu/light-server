@@ -28,7 +28,15 @@ class MyAPI(LitAPI):
         }
 
     def predict(self, x, **kwargs):
-        """Run LLM inference."""
+        """Run LLM inference. x is a list when batching is enabled."""
+        if isinstance(x, list):
+            return [
+                {
+                    "text": self.model(item["prompt"], max_tokens=item["max_tokens"]),
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 0},
+                }
+                for item in x
+            ]
         text = self.model(x["prompt"], max_tokens=x["max_tokens"])
         return {"text": text, "usage": {"prompt_tokens": 0, "completion_tokens": 0}}
 

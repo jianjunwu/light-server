@@ -11,7 +11,9 @@ class MyAPI(LitAPI):
         return request["input"]
 
     def predict(self, x, **kwargs):
-        """Run inference."""
+        """Run inference. x is a list when batching is enabled."""
+        if isinstance(x, list):
+            return [self.model(item) for item in x]
         return self.model(x)
 
     def encode_response(self, output):

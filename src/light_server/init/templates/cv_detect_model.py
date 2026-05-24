@@ -18,9 +18,10 @@ class MyAPI(LitAPI):
         return {"image_b64": image_b64}
 
     def predict(self, x, **kwargs):
-        """Run object detection."""
-        detections = self.model(x["image_b64"])
-        return detections
+        """Run object detection. x is a list when batching is enabled."""
+        if isinstance(x, list):
+            return [self.model(item["image_b64"]) for item in x]
+        return self.model(x["image_b64"])
 
     def encode_response(self, output):
         """Format detection results with bounding boxes."""

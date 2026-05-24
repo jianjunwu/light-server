@@ -71,11 +71,26 @@ async def _do_infer(server: LightServer, model_name: str, version: str | None, r
 
         payload = await request.json()
 
+        # Build request metadata for model hooks
+        request_meta = {
+            "headers": dict(request.headers),
+            "query_params": dict(request.query_params),
+            "client_host": request.client.host if request.client else None,
+            "method": request.method,
+            "url": str(request.url),
+            "path_params": {"model_name": model_name, "version": version},
+        }
+
+        # Call model-level on_request hook if available
+        lit_api = server.model_manager.get_litapi(model_name, resolved_version)
+        if lit_api is not None and hasattr(lit_api, "on_request"):
+            payload = lit_api.on_request(payload, request_meta)
+
         entry = server.registry.get(model_name, version)
         if entry is not None and entry.get("model_type") == "ensemble":
             result = await _do_ensemble_infer(server, model_name, version, payload)
         else:
-            result = await _do_litapi_infer(server, model_name, version, payload)
+            result = await _do_litapi_infer(server, model_name, version, payload, request_meta)
 
         return result
 
@@ -116,7 +131,11 @@ async def _do_ensemble_infer(
 
 
 async def _do_litapi_infer(
-    server: LightServer, model_name: str, version: str | None, payload: dict[str, Any]
+    server: LightServer,
+    model_name: str,
+    version: str | None,
+    payload: dict[str, Any],
+    request_meta: dict[str, Any] | None = None,
 ) -> JSONResponse:
     """Submit inference to a LitAPI worker and await response."""
     uid = None
@@ -134,6 +153,20 @@ async def _do_litapi_infer(
 
         response_item = server.response_buffer.pop(uid)
         response_data, status = response_item.response
+
+        # Call model-level on_response hook if available
+        lit_api = server.model_manager.get_litapi(model_name, version)
+        if lit_api is not None and hasattr(lit_api, "on_response"):
+            response_meta = {
+                "model_name": model_name,
+                "version": version,
+                "request_meta": request_meta or {},
+                "status": "error" if status == LitAPIStatus.ERROR else "ok",
+            }
+            try:
+                response_data = lit_api.on_response(response_data, response_meta)
+            except Exception as e:
+                logger.warning(f"on_response failed for {model_name}: {e}")
 
         if status == LitAPIStatus.ERROR:
             raise HTTPException(status_code=500, detail="Inference error")

@@ -34,12 +34,22 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
             raise HTTPException(status_code=400, detail=f"Invalid model name or version: {exc}")
         ready = server.registry.is_ready(model_name, version)
         active_version = server.registry.get_active_version(model_name)
-        return JSONResponse({
+        result: dict[str, Any] = {
             "name": model_name,
             "version": version or active_version,
             "ready": ready,
             "active_version": active_version,
-        })
+        }
+
+        lit_api = server.model_manager.get_litapi(model_name, version)
+        if lit_api is not None and hasattr(lit_api, "health_check"):
+            try:
+                result["model_status"] = lit_api.health_check()
+            except Exception as e:
+                logger.warning(f"health_check failed for {model_name}: {e}")
+                result["model_status"] = {"status": "error", "error": str(e)}
+
+        return JSONResponse(result)
 
     @app.get("/v2/models/{model_name}/versions")
     async def list_versions(model_name: str) -> JSONResponse:

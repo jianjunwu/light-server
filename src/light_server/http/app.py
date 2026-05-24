@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
@@ -13,10 +15,34 @@ from light_server.core.server import LightServer
 def create_app(server: LightServer) -> FastAPI:
     app = FastAPI(title="Light Server", version="0.1.0")
 
-    # Health check
-    @app.get("/health")
-    async def health() -> Response:
-        return Response(content="ok", status_code=200)
+    # 1. Register dynamic endpoints from model_repo/*_endpoint.py
+    endpoints = server.model_manager.load_dynamic_endpoints()
+
+    def _wrap_async_handler(h):
+        async def _handler(request: Request) -> JSONResponse:
+            result = await h(request, server)
+            return JSONResponse(result)
+        return _handler
+
+    def _wrap_sync_handler(h):
+        def _handler(request: Request) -> JSONResponse:
+            result = h(request, server)
+            return JSONResponse(result)
+        return _handler
+
+    for route, ep in endpoints.items():
+        handler = ep["handler"]
+        methods = ep["methods"]
+        if inspect.iscoroutinefunction(handler):
+            app.add_api_route(f"/{route}", _wrap_async_handler(handler), methods=methods)
+        else:
+            app.add_api_route(f"/{route}", _wrap_sync_handler(handler), methods=methods)
+
+    # 2. Default /health if not overridden by dynamic endpoint
+    if "health" not in endpoints:
+        @app.get("/health")
+        async def health() -> Response:
+            return Response(content="ok", status_code=200)
 
     # Info
     @app.get("/info")

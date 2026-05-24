@@ -15,7 +15,7 @@ from typing import Any
 
 from light_server.config import ModelConfig
 from light_server.core.ensemble import EnsembleParser
-from light_server.core.loader import load_litapi_from_file
+from light_server.core.loader import load_litapi_from_file, load_module_from_file
 from light_server.core.registry import ModelRegistry
 from light_server.core.shm_buffer import ShmPayloadBuffer
 from light_server.core.validation import validate_model_name, validate_version
@@ -60,6 +60,7 @@ class ModelManager:
         self.system_metrics = system_metrics
         self._workers: dict[str, list[mp.Process]] = {}
         self._litapi_instances: dict[str, LitAPI] = {}
+        self._dynamic_endpoints: dict[str, dict[str, Any]] | None = None
         self._workers_setup_status: dict[str, Any] = {}
         # model_name -> actual model directory path (for .lma artifacts extracted to cache)
         self._artifact_model_paths: dict[str, Path] = {}
@@ -155,6 +156,54 @@ class ModelManager:
         self._scan_plain_models(models)
         self._scan_artifact_models(models)
         return models
+
+    def _load_dynamic_endpoints(self) -> dict[str, dict[str, Any]]:
+        """Scan model_repo for *_endpoint.py files and load them.
+
+        Each file defines a custom endpoint registered at ``/{stem}``
+        where ``stem`` is the filename without the ``_endpoint.py`` suffix.
+        The module must expose a ``handler`` callable.
+        An optional ``methods`` list controls HTTP methods (default ["GET"]).
+        """
+        endpoints: dict[str, dict[str, Any]] = {}
+        if not self.repo_path.exists():
+            return endpoints
+        for py_file in self.repo_path.glob("*_endpoint.py"):
+            stem = py_file.stem
+            if not stem.endswith("_endpoint"):
+                continue
+            route = stem[:-9]  # strip "_endpoint"
+            try:
+                module = load_module_from_file(py_file)
+                handler = getattr(module, "handler", None)
+                if handler is None or not callable(handler):
+                    logger.warning(f"Endpoint file {py_file} has no callable 'handler'")
+                    continue
+                methods = getattr(module, "methods", ["GET"])
+                if isinstance(methods, str):
+                    methods = [methods]
+                endpoints[route] = {"handler": handler, "methods": methods}
+            except Exception as e:
+                logger.warning(f"Failed to load endpoint {py_file}: {e}")
+        return endpoints
+
+    def load_dynamic_endpoints(self) -> dict[str, dict[str, Any]]:
+        """Return cached dynamic endpoints, computing once on first call."""
+        if self._dynamic_endpoints is None:
+            self._dynamic_endpoints = self._load_dynamic_endpoints()
+        return self._dynamic_endpoints
+
+    def get_litapi(self, name: str, version: str | None) -> LitAPI | None:
+        """Return the LitAPI instance for a loaded model version.
+
+        If ``version`` is None, uses the currently active version.
+        """
+        if version is None:
+            version = self.registry.get_active_version(name)
+        if version is None:
+            return None
+        key = self._worker_key(name, version)
+        return self._litapi_instances.get(key)
 
     def _resolve_model_base(self, name: str) -> Path:
         """Return the base directory for a model (either plain or from artifact cache)."""

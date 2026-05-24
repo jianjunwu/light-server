@@ -101,6 +101,27 @@ def load_litapi_from_module(module_path: str, class_name: str | None = None) -> 
     return find_litapi_class(module)
 
 
+def load_module_from_file(file_path: Path) -> ModuleType:
+    """Load a generic Python module from a file path.
+
+    Unlike :func:`import_module_from_file`, this does not suppress
+    prometheus or manipulate ``sys.path`` — it simply imports the module.
+    """
+    file_path = Path(file_path).resolve()
+    if not file_path.exists():
+        raise FileNotFoundError(f"Module file not found: {file_path}")
+
+    unique_name = f"_light_server_dynamic_{file_path.stem}_{id(file_path)}"
+    spec = importlib.util.spec_from_file_location(unique_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load module from {file_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[unique_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_litapi_from_file(
     file_path: Path, suppress_prometheus: bool = False
 ) -> type[LitAPI]:

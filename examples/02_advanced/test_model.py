@@ -30,8 +30,18 @@ def test_v1():
 
 
 def test_v2():
+    import importlib
+    from prometheus_client import REGISTRY
+
+    # Clear prometheus registry to avoid duplicate metric names on reload
+    for collector in list(REGISTRY._collector_to_names.keys()):
+        REGISTRY.unregister(collector)
+
     sys.path.insert(0, "./model_repo/advanced_model/2")
-    from model import AdvancedAPI as V2API
+    import model
+
+    importlib.reload(model)
+    V2API = model.AdvancedAPI
 
     api = V2API()
     api.config = {"addend": 50}

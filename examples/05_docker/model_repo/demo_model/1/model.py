@@ -12,6 +12,11 @@ class SentimentAPI(LitAPI):
         return request.get("text", "")
 
     def predict(self, text, **kwargs):
+        if isinstance(text, list):
+            return [self._predict_single(t) for t in text]
+        return self._predict_single(text)
+
+    def _predict_single(self, text):
         tokens = text.lower().split()
         pos = sum(1 for t in tokens if t in self.positive_words)
         neg = sum(1 for t in tokens if t in self.negative_words)

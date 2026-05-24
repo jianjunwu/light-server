@@ -202,6 +202,7 @@ curl -X POST http://127.0.0.1:8000/v2/repository/models/my_model/unload
 
 | Command | Description |
 |---------|-------------|
+| `init` | Initialize project scaffolding (model code, Dockerfile, CI config) |
 | `serve` | Start the inference server |
 | `config-check` | Validate a YAML configuration file |
 | `benchmark` | Run performance benchmark against a running server |
@@ -210,6 +211,9 @@ curl -X POST http://127.0.0.1:8000/v2/repository/models/my_model/unload
 | `unpack` | Unpack a `.lma` artifact |
 
 ```bash
+# Initialize project
+light-server init my_project
+
 # Validate configuration
 light-server config-check server.yaml
 
@@ -263,7 +267,7 @@ Detailed documentation is in the [`docs/en/`](docs/en/) directory:
 | [Configuration Details](docs/en/02_configuration_details.md) | Full field reference + priority rules |
 | [Model Development Guide](docs/en/03_model_development_guide.md) | LitAPI lifecycle + batching/streaming/metrics/versioning |
 | [API Reference](docs/en/04_api_reference.md) | HTTP/gRPC endpoints + status codes |
-| [CLI Command Reference](docs/en/05_cli_command_reference.md) | Full arguments for 6 subcommands |
+| [CLI Command Reference](docs/en/05_cli_command_reference.md) | Full arguments for 7 subcommands |
 | [Operations Guide](docs/en/06_operations_guide.md) | Prometheus + logging + artifact packaging + analyzer + WebUI |
 | [Architecture Design](docs/en/07_architecture_design.md) | Process model + request flow + Mermaid diagrams |
 | [FAQ](docs/en/08_faq.md) | Common questions and performance tuning |

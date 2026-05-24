@@ -202,6 +202,7 @@ curl -X POST http://127.0.0.1:8000/v2/repository/models/my_model/unload
 
 | 命令 | 说明 |
 |------|------|
+| `init` | 初始化项目脚手架，生成模型代码、Dockerfile、CI 配置 |
 | `serve` | 启动推理服务 |
 | `config-check` | 校验 YAML 配置文件 |
 | `benchmark` | 对运行中的服务执行性能压测 |
@@ -210,6 +211,9 @@ curl -X POST http://127.0.0.1:8000/v2/repository/models/my_model/unload
 | `unpack` | 解包 `.lma` 制品 |
 
 ```bash
+# 初始化项目
+light-server init my_project
+
 # 校验配置
 light-server config-check server.yaml
 
@@ -263,7 +267,7 @@ model_repo/
 | [配置详解](docs/zh/02_配置详解.md) | 完整配置字段说明 + 优先级规则 |
 | [模型开发指南](docs/zh/03_模型开发指南.md) | LitAPI 生命周期 + 批处理/流式/指标/版本控制 |
 | [API 参考](docs/zh/04_API参考.md) | HTTP/gRPC 端点 + 状态码 |
-| [CLI 命令参考](docs/zh/05_CLI命令参考.md) | 6 个子命令完整参数 |
+| [CLI 命令参考](docs/zh/05_CLI命令参考.md) | 7 个子命令完整参数 |
 | [运维指南](docs/zh/06_运维指南.md) | Prometheus + 日志 + 制品打包 + 分析器 + WebUI |
 | [架构设计](docs/zh/07_架构设计.md) | 进程模型 + 请求链路 + Mermaid 图 |
 | [FAQ](docs/zh/08_常见问题.md) | 常见问题与性能调优 |

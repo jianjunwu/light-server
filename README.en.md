@@ -236,11 +236,40 @@ Follows the Triton convention:
 
 ```
 model_repo/
-  {model_name}/
-    {version}/
-      model.py       # Must contain a LitAPI subclass
-      config.yaml    # Optional: max_batch_size, batch_timeout, etc.
+  text_classifier/           # model name
+    1/                       # version (numeric string)
+      model.py               # must contain a LitAPI subclass
+      config.yaml            # optional: version-level config
+    2/
+      model.py
+      config.yaml
+  image_detector/
+    1/
+      model.py
+      config.yaml
 ```
+
+### `config.yaml` Fields
+
+Each version's `config.yaml` supports the following fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_batch_size` | int | `1` | Max batch size; `1` disables batching |
+| `batch_timeout` | float | `0.0` | Batching timeout in seconds; `0.0` means no timeout |
+| `stream` | bool | `false` | Enable streaming responses |
+| `continuous_batching` | bool | `false` | Enable Continuous Batching (LLM token-by-token generation) |
+| `max_sequence_length` | int | — | Max sequence length for Continuous Batching |
+| `workers_per_device` | int | `1` | Workers per device |
+| `timeout` | float | `30.0` | Per-request timeout in seconds |
+| `accelerator` | str | `auto` | Accelerator: `auto` / `cpu` / `gpu` / `mps` |
+
+### Key Rules
+
+- **`model.py` requirement**: Each `model.py` must contain exactly one `LitAPI` subclass. The server dynamically imports and loads it automatically.
+- **Version naming**: Version directory names must be numeric strings (e.g. `1`, `2`). Non-numeric names like `v1` are not supported. The largest numeric version is loaded by default.
+- **Config scope**: `config.yaml` is **version-level** configuration. Different versions of the same model can have independent batch sizes, timeouts, accelerators, etc.
+- **Quick scaffold**: Use `light-server init my_project` to automatically generate a model repository that follows this layout with default config.
 
 ## Configuration
 

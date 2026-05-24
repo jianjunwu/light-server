@@ -236,11 +236,40 @@ light-server unpack artifact.lma --to ./model_repo
 
 ```
 model_repo/
-  {model_name}/
-    {version}/
-      model.py       # 必须包含 LitAPI 子类
-      config.yaml    # 可选：max_batch_size、batch_timeout 等
+  text_classifier/           # 模型名称
+    1/                       # 版本号（数字字符串）
+      model.py               # 必须包含 LitAPI 子类
+      config.yaml            # 可选：版本级配置
+    2/
+      model.py
+      config.yaml
+  image_detector/
+    1/
+      model.py
+      config.yaml
 ```
+
+### `config.yaml` 可用字段
+
+每个版本的 `config.yaml` 支持以下字段：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `max_batch_size` | int | `1` | 最大批大小，`1` 表示关闭批处理 |
+| `batch_timeout` | float | `0.0` | 批处理超时（秒），`0.0` 表示无超时 |
+| `stream` | bool | `false` | 是否启用流式响应 |
+| `continuous_batching` | bool | `false` | 是否启用 Continuous Batching（LLM 逐 token 生成） |
+| `max_sequence_length` | int | — | Continuous Batching 时的最大序列长度 |
+| `workers_per_device` | int | `1` | 每设备工作进程数 |
+| `timeout` | float | `30.0` | 单请求超时（秒） |
+| `accelerator` | str | `auto` | 加速器：`auto` / `cpu` / `gpu` / `mps` |
+
+### 关键规则
+
+- **`model.py` 要求**：每个 `model.py` 中必须有且仅有一个 `LitAPI` 子类，服务器通过动态导入自动识别并加载。
+- **版本号格式**：版本目录名必须是数字字符串（如 `1`、`2`），不支持 `v1` 等非纯数字格式。加载时默认使用数字最大的版本（即最新版本）。
+- **配置作用域**：`config.yaml` 是**版本级**配置，同一模型的不同版本可拥有独立的批大小、超时、加速器等配置。
+- **快速生成**：使用 `light-server init my_project` 可自动生成符合上述标准的模型仓库结构和默认配置。
 
 ## 配置说明
 

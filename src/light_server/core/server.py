@@ -180,7 +180,7 @@ class LightServer:
                 elif load_policy == "latest":
                     should_load = version == max(models, key=lambda x: x["version"])["version"]
                 else:  # explicit
-                    should_load = version in versions_to_load
+                    should_load = version in versions_to_load if versions_to_load else True
 
                 if should_load:
                     self.model_manager.load(name, version)

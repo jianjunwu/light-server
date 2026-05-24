@@ -41,7 +41,7 @@ class AdaptiveBatchedLoop(BatchedLoop):
     ) -> tuple[list, list]:
         payloads: list[tuple[Any, Any, Any]] = []
         timed_out_uids: list[tuple[Any, Any]] = []
-        apply_timeout = lit_api.request_timeout not in (-1, False)
+        apply_timeout = lit_api.request_timeout is not None and lit_api.request_timeout not in (-1, False)
         max_batch = lit_api.max_batch_size
         base_timeout = lit_api.batch_timeout
 
@@ -223,7 +223,11 @@ class StreamSession:
 
     def _fallback_predict(self, input_gen):
         for chunk in input_gen:
-            yield self.lit_api.predict(chunk)
+            result = self.lit_api.predict(chunk)
+            if hasattr(result, "__iter__") and not isinstance(result, (str, bytes, dict, list, tuple)):
+                yield from result
+            else:
+                yield result
 
 
 class BidirectionalStreamingLoop(DefaultLoop):

@@ -77,6 +77,7 @@ def find_litapi_class(module: ModuleType) -> type[LitAPI]:
             isinstance(obj, type)
             and issubclass(obj, LitAPI)
             and obj is not LitAPI
+            and obj.__name__ != "LitAPI"
         ):
             return obj
     raise ValueError(f"No LitAPI subclass found in module {module.__name__}")

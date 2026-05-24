@@ -221,4 +221,4 @@ __marimo__/
 CLAUDE.md
 
 # Model repository (populated at runtime, examples live elsewhere)
-model_repo/
+./model_repo/

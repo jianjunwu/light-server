@@ -111,3 +111,11 @@ class LogConsumer:
             for _name, handler in handlers:
                 if record.levelno >= handler.level:
                     handler.emit(record)
+
+        # Flush and close all handlers on shutdown
+        for _name, handler in handlers:
+            try:
+                handler.flush()
+                handler.close()
+            except Exception:
+                pass

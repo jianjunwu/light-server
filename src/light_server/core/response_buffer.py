@@ -39,6 +39,9 @@ class TTLResponseBuffer:
     # ------------------------------------------------------------------
     def start(self) -> None:
         """Start the background cleanup thread."""
+        if self._cleanup_thread is not None and self._cleanup_thread.is_alive():
+            return
+        self._stop_event.clear()
         t = threading.Thread(
             target=self._cleanup_loop,
             daemon=True,

@@ -86,21 +86,24 @@ class ShmPayloadBuffer:
             return data
 
         shm_name, size = data
+        shm = None
         try:
             shm = shared_memory.SharedMemory(name=shm_name)
             payload = pickle.loads(shm.buf[:size])
-            shm.close()
-            # Try to unlink from worker side; on macOS this may fail,
-            # in which case the GC path on the manager side cleans it up.
-            try:
-                shm.unlink()
-            except Exception:
-                pass
             return payload
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to retrieve payload from shared memory {shm_name}"
             ) from exc
+        finally:
+            if shm is not None:
+                shm.close()
+                # Try to unlink from worker side; on macOS this may fail,
+                # in which case the GC path on the manager side cleans it up.
+                try:
+                    shm.unlink()
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     #  Cleanup

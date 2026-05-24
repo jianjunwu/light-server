@@ -91,6 +91,19 @@ class ModelRegistry:
             if entry is not None:
                 entry["status"] = status
 
+    def update_entry(self, name: str, version: str, **fields: Any) -> bool:
+        """Safely update fields on an existing registry entry.
+
+        Returns True if the entry existed and was updated.
+        """
+        key = self._key(name, version)
+        with self._lock:
+            entry = self._registry.get(key)
+            if entry is None:
+                return False
+            entry.update(fields)
+            return True
+
     def get(self, name: str, version: str | None = None) -> dict[str, Any] | None:
         with self._lock:
             if version is None:

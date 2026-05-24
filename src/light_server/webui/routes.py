@@ -509,6 +509,7 @@ async def _run_benchmark_job(
     store: BenchmarkReportStore,
 ) -> None:
     global _benchmark_running
+    target = None
     try:
         _job_store[job_id] = {"status": "running", "progress": 5}
         port = server.config.server.http_port
@@ -544,7 +545,6 @@ async def _run_benchmark_job(
                 concurrency=concurrency,
                 duration=duration,
             )
-            await target.close()
 
         _job_store[job_id]["progress"] = 90
         report_id = store.save(
@@ -565,6 +565,11 @@ async def _run_benchmark_job(
         _job_store[job_id] = {"status": "failed", "error": str(e)}
     finally:
         _benchmark_running = False
+        if target is not None:
+            try:
+                await target.close()
+            except Exception:
+                pass
 
 
 # ------------------------------------------------------------------

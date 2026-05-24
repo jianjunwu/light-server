@@ -77,6 +77,7 @@ class LightServer:
         )
 
         self._shutdown_event = threading.Event()
+        self._shutdown_lock = threading.Lock()
         buffer_ttl = self.config.server.timeout + 30.0
         self.response_buffer = TTLResponseBuffer(
             ttl_seconds=buffer_ttl,
@@ -297,9 +298,10 @@ class LightServer:
         Prometheus multiproc directories. This is called automatically on
         SIGINT/SIGTERM, or can be invoked programmatically.
         """
-        if getattr(self, "_shutdown_done", False):
-            return
-        self._shutdown_done = True
+        with self._shutdown_lock:
+            if getattr(self, "_shutdown_done", False):
+                return
+            self._shutdown_done = True
 
         logger.info("Shutting down LightServer...")
         self.response_buffer.stop()

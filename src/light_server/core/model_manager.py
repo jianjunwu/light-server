@@ -308,9 +308,7 @@ class ModelManager:
             self.registry.register(name, version, model_config, model_type="ensemble")
             ensemble_config = EnsembleParser.parse(model_config)
             # Store parsed ensemble config in registry entry for runtime use
-            entry = dict(self.registry.get(name, version) or {})
-            entry["ensemble_config"] = ensemble_config
-            self.registry._registry[self.registry._key(name, version)] = entry
+            self.registry.update_entry(name, version, ensemble_config=ensemble_config)
 
             self.registry.set_status(name, version, "READY")
 
@@ -744,9 +742,9 @@ class ModelManager:
         uid = self._next_uid(name, version)
         payload = {"_stream_meta": {"msg_type": "STREAM_CLOSE", "stream_id": stream_id}}
         try:
-            q.put_nowait((response_queue_id, uid, time.monotonic(), payload))
+            q.put((response_queue_id, uid, time.monotonic(), payload), timeout=1.0)
         except queue.Full:
-            logger.warning(f"Queue full dropping STREAM_CLOSE for {name} v{version}")
+            logger.error(f"Queue full: STREAM_CLOSE dropped for {name} v{version}")
 
     def infer_stream_cancel(self, name: str, stream_id: str, version: str | None = None, response_queue_id: int = 0) -> None:
         """Cancel a bidirectional stream immediately."""
@@ -774,9 +772,9 @@ class ModelManager:
         uid = self._next_uid(name, version)
         payload = {"_stream_meta": {"msg_type": "STREAM_CANCEL", "stream_id": stream_id}}
         try:
-            q.put_nowait((response_queue_id, uid, time.monotonic(), payload))
+            q.put((response_queue_id, uid, time.monotonic(), payload), timeout=1.0)
         except queue.Full:
-            logger.warning(f"Queue full dropping STREAM_CANCEL for {name} v{version}")
+            logger.error(f"Queue full: STREAM_CANCEL dropped for {name} v{version}")
 
     def activate(self, name: str, version: str) -> bool:
         """Activate a specific version for default routing.
@@ -934,7 +932,7 @@ class ModelManager:
             if not all(w.is_alive() for w in workers):
                 raise WorkerCrashedError("One or more workers died during startup")
             ready_count = sum(1 for v in status_dict.values() if v == "ready")
-            if ready_count > 0:
+            if ready_count == len(workers):
                 return
             time.sleep(0.1)
         raise InferenceTimeoutError("Workers did not become ready in time")

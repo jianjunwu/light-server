@@ -72,6 +72,21 @@ pip install light-server
 
 Requires Python >= 3.10.
 
+### Development from Source
+
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management:
+
+```bash
+# Clone and sync dependencies
+uv sync
+
+# Run tests
+uv run pytest tests/ -v
+
+# Start the server (development mode)
+uv run light-server serve --config server.yaml
+```
+
 ## Quick Start
 
 ### Option 1: Project Scaffolding (Recommended)
@@ -227,13 +242,33 @@ model_repo/
 
 See `server.yaml` for a full example. Key sections:
 
-- `server`: HTTP/gRPC/metrics ports, host, accelerator, timeout, logging
-- `grpc`: enable/disable gRPC endpoint
+- `server`: HTTP/gRPC/metrics ports, host, accelerator, timeout, log level, number of API workers
+- `grpc`: enable/disable gRPC endpoint, `max_workers`
 - `metrics`: enable/disable Prometheus metrics
 - `model_repository`: repository path and control mode (`explicit`, `poll`, `none`)
 - `load_models`: list of models to auto-load on startup
 - `models`: per-model overrides (batch size, streaming, accelerator, etc.)
+- `logging`: log mode, format, output path, rotation policy
 - `webui`: built-in web interface settings
+
+For a full field reference, see [Configuration Details](docs/en/02_configuration_details.md).
+
+## Documentation
+
+Detailed documentation is in the [`docs/en/`](docs/en/) directory:
+
+| Document | Content |
+|----------|---------|
+| [Quick Start](docs/en/01_quick_start.md) | Installation + 3-minute getting started |
+| [Configuration Details](docs/en/02_configuration_details.md) | Full field reference + priority rules |
+| [Model Development Guide](docs/en/03_model_development_guide.md) | LitAPI lifecycle + batching/streaming/metrics/versioning |
+| [API Reference](docs/en/04_api_reference.md) | HTTP/gRPC endpoints + status codes |
+| [CLI Command Reference](docs/en/05_cli_command_reference.md) | Full arguments for 6 subcommands |
+| [Operations Guide](docs/en/06_operations_guide.md) | Prometheus + logging + artifact packaging + analyzer + WebUI |
+| [Architecture Design](docs/en/07_architecture_design.md) | Process model + request flow + Mermaid diagrams |
+| [FAQ](docs/en/08_faq.md) | Common questions and performance tuning |
+
+Chinese documentation is in [`docs/zh/`](docs/zh/).
 
 ## Architecture
 
@@ -249,12 +284,17 @@ See the [`examples/`](examples/) directory for runnable examples:
 
 | Example | Description |
 |---------|-------------|
-| [`01_quickstart`](examples/01_quickstart/) | Minimal model — serve, infer, admin APIs |
-| [`02_advanced`](examples/02_advanced/) | Batching + custom metrics + hot reload + versioning |
+| [`01_quickstart`](examples/01_quickstart/) | Smart text enhancement — serve, infer, admin APIs |
+| [`02_advanced`](examples/02_advanced/) | Advanced features — batching + custom metrics + hot reload + versioning |
 | [`03_cv_pipeline`](examples/03_cv_pipeline/) | Real CV pipeline — image preprocessing + ResNet classification |
 | [`04_llm_streaming`](examples/04_llm_streaming/) | LLM streaming inference — WebSocket token-by-token generation |
 | [`05_docker`](examples/05_docker/) | Docker containerized deployment — Dockerfile + docker-compose |
 | [`06_text_classification`](examples/06_text_classification/) | Real NLP classification — DistilBERT sentiment analysis + adaptive batching |
+| [`07_batching_speedup`](examples/07_batching_speedup/) | Batching speedup comparison — data-driven throughput gains |
+| [`08_grpc_client`](examples/08_grpc_client/) | gRPC high-performance calls — latency comparison vs HTTP REST |
+| [`09_openai_compatible`](examples/09_openai_compatible/) | OpenAI format adapter — real-time response transformation |
+| [`10_ensemble_pipeline`](examples/10_ensemble_pipeline/) | DAG multi-model pipeline orchestration — intra-layer parallelism, inter-layer serial |
+| [`11_hooks_and_endpoints`](examples/11_hooks_and_endpoints/) | Model lifecycle hooks + dynamic endpoints — request/response interception + custom routes |
 
 Each example includes a `run.sh` one-shot script and `test_model.py` for standalone model validation.
 

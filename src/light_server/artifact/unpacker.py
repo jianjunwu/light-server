@@ -102,7 +102,19 @@ class ModelUnpacker:
         with zipfile.ZipFile(self.artifact_path, "r") as zf:
             for rel_path in self.manifest.files:
                 data = zf.read(rel_path)
+
+                # Security: reject path traversal in artifact entries
+                path_parts = Path(rel_path).parts
+                if ".." in path_parts or Path(rel_path).is_absolute():
+                    raise ArtifactCorruptedError(f"Invalid path in artifact: {rel_path}")
+
                 dest = model_dir / rel_path
+                # Defense-in-depth: ensure resolved path stays inside model_dir
+                try:
+                    dest.resolve().relative_to(model_dir.resolve())
+                except ValueError:
+                    raise ArtifactCorruptedError(f"Path traversal detected: {rel_path}")
+
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with open(dest, "wb") as f:
                     f.write(data)

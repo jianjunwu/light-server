@@ -250,7 +250,15 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
                 # TODO: read verify_key from config if provided
                 pass
             manifest = unpacker.validate(public_key_pem=public_key)
-            dest = Path(server.config.model_repository.path) / file.filename
+
+            # Security: sanitize filename to prevent path traversal
+            safe_name = Path(file.filename).name
+            if ".." in safe_name or "/" in safe_name or "\\" in safe_name or not safe_name.endswith(".lma"):
+                return HTMLResponse(
+                    content="<span style='color:#991b1b;'>Invalid filename</span>",
+                    status_code=400,
+                )
+            dest = Path(server.config.model_repository.path) / safe_name
             shutil.copy2(tmp_path, dest)
             return HTMLResponse(
                 content=f"<span style='color:#166534;'>Uploaded {manifest.name} v{manifest.version}</span>"

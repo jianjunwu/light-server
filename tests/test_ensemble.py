@@ -18,7 +18,7 @@ from litserve.transport.factory import TransportConfig, create_transport_from_co
 from litserve.utils import LitAPIStatus
 
 
-def _create_test_env():
+def _create_test_env(model_repo):
     """Create manager, registry, transport, and model manager for tests."""
     import multiprocessing as mp
     manager = mp.Manager()
@@ -28,14 +28,13 @@ def _create_test_env():
     transport_config.manager = manager
     transport = create_transport_from_config(transport_config)
 
-    repo = Path(__file__).parent.parent / "model_repo"
-    mm = ModelManager(repo, registry, transport=transport)
+    mm = ModelManager(model_repo, registry, transport=transport)
     return manager, registry, transport, mm
 
 
-def test_list_repository_detects_ensemble():
+def test_list_repository_detects_ensemble(model_repo):
     """list_repository should mark ensemble models correctly."""
-    _m, _r, _t, mm = _create_test_env()
+    _m, _r, _t, mm = _create_test_env(model_repo)
     models = mm.list_repository()
     ensemble = [m for m in models if m["name"] == "my_ensemble"]
     assert len(ensemble) == 1
@@ -43,9 +42,9 @@ def test_list_repository_detects_ensemble():
     assert ensemble[0]["version"] == "1"
 
 
-def test_load_ensemble_no_workers():
+def test_load_ensemble_no_workers(model_repo):
     """Ensemble loads instantly without spawning workers."""
-    _m, registry, _t, mm = _create_test_env()
+    _m, registry, _t, mm = _create_test_env(model_repo)
     success = mm.load("my_ensemble", version="1")
     assert success
     assert registry.is_ready("my_ensemble", "1")
@@ -103,12 +102,12 @@ def test_ensemble_parser_topological_layers():
     assert layer1_names == {"c"}
 
 
-def test_ensemble_end_to_end():
+def test_ensemble_end_to_end(model_repo):
     """Full ensemble inference with mocked sub-models."""
     import asyncio
     import threading
 
-    _m, registry, _t, mm = _create_test_env()
+    _m, registry, _t, mm = _create_test_env(model_repo)
 
     assert mm.load("my_ensemble", version="1")
     entry = registry.get("my_ensemble", "1")

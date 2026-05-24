@@ -1,5 +1,6 @@
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -55,6 +56,7 @@ server:
         stderr=subprocess.STDOUT,
         text=True,
         cwd=str(PROJECT_ROOT),
+        start_new_session=True,
     )
 
     base = f"http://127.0.0.1:{http_port}"
@@ -71,20 +73,28 @@ server:
         except requests.ConnectionError:
             continue
     else:
-        proc.terminate()
-        proc.wait(timeout=5)
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
         raise RuntimeError("Server did not start")
 
     return proc, temp_config, base, grpc_target
 
 
 def _cleanup(proc, temp_config):
-    proc.terminate()
     try:
-        proc.wait(timeout=5)
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        pass
     try:
         os.unlink(temp_config)
     except OSError:

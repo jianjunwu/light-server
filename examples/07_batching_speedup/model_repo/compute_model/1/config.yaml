@@ -1,4 +1,3 @@
-name: compute_model
 max_batch_size: 16
 batch_timeout: 0.05
 accelerator: cpu

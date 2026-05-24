@@ -1,8 +1,6 @@
 """Tests for Continuous Batching support."""
 
 import multiprocessing as mp
-import time
-from pathlib import Path
 
 import pytest
 
@@ -12,19 +10,16 @@ from light_server.core.model_manager import ModelManager
 from light_server.core.registry import ModelRegistry
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
-def test_load_cb_model_class():
+def test_load_cb_model_class(model_repo):
     """Verify the continuous batching model class can be loaded."""
-    model_py = PROJECT_ROOT / "model_repo" / "cb_model" / "1" / "model.py"
+    model_py = model_repo / "cb_model" / "1" / "model.py"
     cls = load_litapi_from_file(model_py)
     assert cls.__name__ == "CBModel"
 
 
-def test_cb_model_has_required_methods():
+def test_cb_model_has_required_methods(model_repo):
     """Verify the model implements the required continuous batching methods."""
-    model_py = PROJECT_ROOT / "model_repo" / "cb_model" / "1" / "model.py"
+    model_py = model_repo / "cb_model" / "1" / "model.py"
     cls = load_litapi_from_file(model_py)
     instance = cls()
     instance.setup("cpu")
@@ -41,9 +36,9 @@ def test_cb_model_has_required_methods():
     assert instance.has_capacity() is True
 
 
-def test_cb_model_predict_and_finish():
+def test_cb_model_predict_and_finish(model_repo):
     """Verify the model's predict and has_finished logic."""
-    model_py = PROJECT_ROOT / "model_repo" / "cb_model" / "1" / "model.py"
+    model_py = model_repo / "cb_model" / "1" / "model.py"
     cls = load_litapi_from_file(model_py)
     instance = cls()
     instance.setup("cpu")
@@ -64,12 +59,11 @@ def test_cb_model_predict_and_finish():
     assert instance.has_finished("uid1", "<EOS>", 10) is True
 
 
-def test_cb_model_manager_load():
+def test_cb_model_manager_load(model_repo):
     """Test loading a continuous batching model through ModelManager."""
-    repo = PROJECT_ROOT / "model_repo"
     manager = mp.Manager()
     registry = ModelRegistry(manager)
-    mm = ModelManager(repo, registry)
+    mm = ModelManager(model_repo, registry)
 
     success = mm.load("cb_model", "1")
     assert success is True
@@ -86,16 +80,14 @@ def test_cb_model_manager_load():
     mm.unload("cb_model", "1")
 
 
-def test_cb_forces_single_worker():
+def test_cb_forces_single_worker(model_repo):
     """Verify that continuous batching forces workers_per_device=1."""
-    repo = PROJECT_ROOT / "model_repo"
     manager = mp.Manager()
     registry = ModelRegistry(manager)
-    mm = ModelManager(repo, registry)
+    mm = ModelManager(model_repo, registry)
 
     # Override with workers_per_device=3; should be forced to 1
     override = ModelConfig(
-        name="cb_model",
         workers_per_device=3,
     )
     success = mm.load("cb_model", "1", config_override=override)
@@ -111,7 +103,6 @@ def test_cb_forces_single_worker():
 def test_config_continuous_batching_fields():
     """Verify ModelConfig dataclass accepts new fields."""
     cfg = ModelConfig(
-        name="test",
         continuous_batching=True,
         max_sequence_length=4096,
     )

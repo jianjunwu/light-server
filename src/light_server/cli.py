@@ -182,15 +182,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             ),
             model_repository=ModelRepositoryConfig(
                 path=model_repo_path,
-                control_mode="none",
+                control_mode="all",
             ),
         )
 
         if args.module:
             # Single module mode: parse module:Class
             config.load_models = ["__cli__"]
-            from light_server.config import ModelConfig
-            config.models = [ModelConfig(name="__cli__", source=args.module)]
 
     server = LightServer(config)
     try:

@@ -35,7 +35,7 @@ def test_system_metrics_creation():
     assert sm.active_workers is not None
 
 
-def test_model_load_metrics():
+def test_model_load_metrics(isolated_model_repo):
     """ModelManager.load() should record metrics via system_metrics."""
     manager = mp.Manager()
     registry = ModelRegistry(manager)
@@ -47,8 +47,7 @@ def test_model_load_metrics():
     metrics_registry, _ = setup_multiproc_metrics(clean=True)
     system_metrics = SystemMetrics(metrics_registry)
 
-    repo = Path(__file__).parent.parent / "model_repo"
-    mm = ModelManager(repo, registry, transport=transport, system_metrics=system_metrics)
+    mm = ModelManager(isolated_model_repo, registry, transport=transport, system_metrics=system_metrics)
 
     success = mm.load("test_model", version="1")
     assert success
@@ -58,13 +57,11 @@ def test_model_load_metrics():
     assert not registry.is_ready("test_model", "1")
 
 
-def test_model_with_custom_prometheus_metrics():
+def test_model_with_custom_prometheus_metrics(isolated_model_repo):
     """Models defining custom prometheus metrics should load successfully."""
     from light_server.core.loader import load_litapi_from_file
 
-    model_py = (
-        Path(__file__).parent.parent / "model_repo" / "test_model" / "1" / "model.py"
-    )
+    model_py = isolated_model_repo / "test_model" / "1" / "model.py"
     cls = load_litapi_from_file(model_py, suppress_prometheus=True)
     assert cls.__name__ == "TestModel"
     # The class should have custom prometheus metrics defined
@@ -72,14 +69,12 @@ def test_model_with_custom_prometheus_metrics():
     assert hasattr(cls, "predict_latency")
 
 
-def test_load_litapi_with_suppress_prometheus():
+def test_load_litapi_with_suppress_prometheus(isolated_model_repo):
     """suppress_prometheus=True should avoid registering metrics to default registry."""
     from light_server.core.loader import load_litapi_from_file
     import prometheus_client
 
-    model_py = (
-        Path(__file__).parent.parent / "model_repo" / "test_model" / "1" / "model.py"
-    )
+    model_py = isolated_model_repo / "test_model" / "1" / "model.py"
 
     # First load with suppression
     cls1 = load_litapi_from_file(model_py, suppress_prometheus=True)

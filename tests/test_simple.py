@@ -5,11 +5,8 @@ from light_server.core.loader import load_litapi_from_file
 from light_server.core.model_manager import ModelManager
 from light_server.core.registry import ModelRegistry
 
-from pathlib import Path
-
-
-def test_load_litapi():
-    model_py = Path(__file__).parent.parent / "model_repo" / "test_model" / "1" / "model.py"
+def test_load_litapi(model_repo):
+    model_py = model_repo / "test_model" / "1" / "model.py"
     cls = load_litapi_from_file(model_py)
     assert cls.__name__ == "TestModel"
 
@@ -39,11 +36,10 @@ def test_model_registry():
     assert versions[1]["version"] in ("1", "2")
 
 
-def test_model_manager_list_repo():
-    repo = Path(__file__).parent.parent / "model_repo"
+def test_model_manager_list_repo(model_repo):
     import multiprocessing as mp
     manager = mp.Manager()
     registry = ModelRegistry(manager)
-    mm = ModelManager(repo, registry)
+    mm = ModelManager(model_repo, registry)
     models = mm.list_repository()
     assert any(m["name"] == "test_model" for m in models)

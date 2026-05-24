@@ -1,4 +1,3 @@
-name: math_pipeline
 ensemble:
   steps:
     - name: square

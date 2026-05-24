@@ -59,9 +59,6 @@ class ModelRepositoryConfig:
 
 @dataclass
 class ModelConfig:
-    name: str
-    version: str = "1"
-    source: str | None = None
     api_path: str = "/predict"
     max_batch_size: int = 1
     batch_timeout: float = 0.0
@@ -89,7 +86,6 @@ class Config:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     model_repository: ModelRepositoryConfig = field(default_factory=ModelRepositoryConfig)
     load_models: list[str] = field(default_factory=list)
-    models: list[ModelConfig] = field(default_factory=list)
     webui: WebUIConfig = field(default_factory=WebUIConfig)
 
 
@@ -125,8 +121,6 @@ def load_config(path: str | Path) -> Config:
         config.model_repository = _to_dataclass(raw["model_repository"], ModelRepositoryConfig)
     if "load_models" in raw:
         config.load_models = raw["load_models"]
-    if "models" in raw:
-        config.models = [_to_dataclass(m, ModelConfig) for m in raw["models"]]
     if "webui" in raw:
         config.webui = _to_dataclass(raw["webui"], WebUIConfig)
 

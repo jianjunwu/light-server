@@ -77,7 +77,7 @@
       <select name="control_mode">
         <option value="explicit" {% if cfg.model_repository.control_mode == 'explicit' %}selected{% endif %}>explicit</option>
         <option value="poll" {% if cfg.model_repository.control_mode == 'poll' %}selected{% endif %}>poll</option>
-        <option value="none" {% if cfg.model_repository.control_mode == 'none' %}selected{% endif %}>none</option>
+        <option value="all" {% if cfg.model_repository.control_mode == 'all' %}selected{% endif %}>all</option>
       </select>
     </label>
     <label>Poll Interval (s)<input type="number" name="poll_interval" value="{{ cfg.model_repository.poll_interval }}" min="1"></label>

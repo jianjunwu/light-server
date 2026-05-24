@@ -159,7 +159,7 @@ class LightServer:
             by_model[m["name"]].append(m)
 
         names_to_load = []
-        if mode == "none":
+        if mode == "all":
             names_to_load = list(by_model.keys())
         elif mode in ("explicit", "poll"):
             names_to_load = self.config.load_models

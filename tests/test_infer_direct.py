@@ -14,7 +14,7 @@ from litserve.transport.factory import TransportConfig, create_transport_from_co
 from litserve.utils import LitAPIStatus, ResponseBufferItem
 
 
-def test_load_and_infer():
+def test_load_and_infer(isolated_model_repo):
     """Test loading a model and running inference directly."""
     import multiprocessing as mp
     manager = mp.Manager()
@@ -24,8 +24,7 @@ def test_load_and_infer():
     transport_config.manager = manager
     transport = create_transport_from_config(transport_config)
 
-    repo = Path(__file__).parent.parent / "model_repo"
-    mm = ModelManager(repo, registry, transport=transport)
+    mm = ModelManager(isolated_model_repo, registry, transport=transport)
 
     # Load model
     success = mm.load("test_model")

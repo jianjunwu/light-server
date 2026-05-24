@@ -50,17 +50,6 @@ load_models:
   - model_a
   - model_b
 
-models:
-  - name: model_a
-    version: "1"
-    api_path: "/predict"
-    max_batch_size: 4
-    batch_timeout: 0.01
-    stream: false
-    accelerator: null
-    devices: null
-    workers_per_device: null
-
 webui:
   enabled: true
   report_retention_days: 30
@@ -97,31 +86,13 @@ webui:
 |------|----------|----------|
 | `explicit` | Only load models listed in `load_models` | Production, precise control |
 | `poll` | Auto-detect repo changes, dynamically load/unload | Development |
-| `none` | Load all available models in the repository | Quick validation |
-
-#### `models` (Global Model Overrides)
-
-The `models` field in `server.yaml` sets global defaults for specific models. Model-level `config.yaml` has higher priority.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `name` | str | — | Model name (required) |
-| `version` | str | `1` | Version number |
-| `source` | str | `null` | Module path, used by CLI inline mode |
-| `api_path` | str | `/predict` | Custom API path |
-| `max_batch_size` | int | `1` | Max batch size, `1` disables batching |
-| `batch_timeout` | float | `0.0` | Batch timeout in seconds |
-| `stream` | bool | `false` | Enable streaming response |
-| `accelerator` | str | `null` | Override global accelerator |
-| `devices` | int/str | `null` | Override global device count |
-| `workers_per_device` | int | `null` | Override global workers per device |
+| `all` | Load all available models in the repository | Quick validation |
 
 ## Model Configuration (config.yaml)
 
 Placed in `model_repo/{name}/{version}/config.yaml`, applies to the current version only.
 
 ```yaml
-name: my_model
 api_path: /predict
 max_batch_size: 4
 batch_timeout: 0.01
@@ -136,8 +107,7 @@ When the same field is defined in multiple places, priority from high to low:
 
 1. **Version-level `config.yaml`** (highest priority)
 2. **Model-level `model_config.yaml`** — loading policy and version strategy
-3. **Global `server.yaml` `models` field**
-4. **Global `server.yaml` `server` field** (defaults)
+3. **Global `server.yaml` `server` field** (defaults)
 
 > See [Model Management](09_model_management.md) for details on `model_config.yaml`, version policies, and ensemble pipelines.
 

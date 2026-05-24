@@ -9,11 +9,18 @@ import uuid
 from collections import deque
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from light_server.core.ensemble import EnsembleExecutor
-from light_server.core.model_manager import QueueFullError
+from light_server.core.exceptions import (
+    InferenceTimeoutError,
+    LightServerError,
+    ModelNotReadyError,
+    QueueFullError,
+    WorkerCrashedError,
+)
+from light_server.core.response import error_dict
 from light_server.core.server import LightServer
 from light_server.core.validation import validate_model_name, validate_version
 from litserve.utils import LitAPIStatus, LoopResponseType, ResponseBufferItem
@@ -49,12 +56,9 @@ def create_inference_routes(app: FastAPI, server: LightServer) -> None:
 
 
 async def _do_infer(server: LightServer, model_name: str, version: str | None, request: Request) -> JSONResponse:
-    try:
-        validate_model_name(model_name)
-        if version is not None:
-            validate_version(version)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid model name or version: {exc}")
+    validate_model_name(model_name)
+    if version is not None:
+        validate_version(version)
 
     resolved_version = version or server.registry.get_active_version(model_name) or "unknown"
     server.system_metrics.record_request_start(model_name, resolved_version)
@@ -67,7 +71,7 @@ async def _do_infer(server: LightServer, model_name: str, version: str | None, r
             if version:
                 detail += f" version {version}"
             detail += " not ready"
-            raise HTTPException(status_code=404, detail=detail)
+            raise ModelNotReadyError(detail)
 
         payload = await request.json()
 
@@ -94,7 +98,7 @@ async def _do_infer(server: LightServer, model_name: str, version: str | None, r
 
         return result
 
-    except HTTPException as e:
+    except LightServerError as e:
         status = "5xx" if e.status_code >= 500 else "4xx"
         raise
     except asyncio.TimeoutError:
@@ -113,21 +117,21 @@ async def _do_ensemble_infer(
     """Execute an ensemble DAG and return the final step's output."""
     entry = server.registry.get(model_name, version)
     if entry is None:
-        raise HTTPException(status_code=404, detail=f"Model {model_name} not found")
+        raise ModelNotReadyError(f"Model {model_name} not found")
 
     ensemble_config = entry.get("ensemble_config")
     if ensemble_config is None:
-        raise HTTPException(status_code=500, detail="Ensemble config missing")
+        raise WorkerCrashedError("Ensemble config missing")
 
     try:
         executor = EnsembleExecutor()
         result = await executor.execute(server, ensemble_config, payload, ensemble_name=model_name)
         return JSONResponse(result)
-    except HTTPException:
+    except LightServerError:
         raise
     except Exception as e:
         logger.exception(f"Ensemble inference error for {model_name}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise WorkerCrashedError(str(e)) from e
 
 
 async def _do_litapi_infer(
@@ -169,23 +173,23 @@ async def _do_litapi_infer(
                 logger.warning(f"on_response failed for {model_name}: {e}")
 
         if status == LitAPIStatus.ERROR:
-            raise HTTPException(status_code=500, detail="Inference error")
+            raise WorkerCrashedError("Inference error")
 
         return JSONResponse(response_data)
 
-    except QueueFullError as exc:
-        raise HTTPException(status_code=429, detail=str(exc))
+    except QueueFullError:
+        raise
     except asyncio.TimeoutError:
         server.response_buffer.pop(uid, None)
-        raise HTTPException(status_code=504, detail="Inference timeout")
+        raise InferenceTimeoutError("Inference timeout")
     except asyncio.CancelledError:
         server.response_buffer.pop(uid, None)
         raise
-    except HTTPException:
+    except LightServerError:
         raise
     except Exception as e:
         logger.exception(f"Inference error for {model_name}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise WorkerCrashedError(str(e)) from e
     finally:
         if uid is not None:
             resolved_version = version or server.registry.get_active_version(model_name) or "unknown"
@@ -200,8 +204,8 @@ async def _do_ws_stream(
         validate_model_name(model_name)
         if version is not None:
             validate_version(version)
-    except ValueError as exc:
-        await websocket.close(code=1011, reason=f"Invalid model name or version: {exc}")
+    except LightServerError as exc:
+        await websocket.close(code=1011, reason=str(exc))
         return
 
     await websocket.accept()
@@ -304,7 +308,7 @@ async def _ws_sender(
                     error_msg = str(response_data)
                     if isinstance(response_data, Exception):
                         error_msg = str(response_data)
-                    await websocket.send_json({"error": error_msg})
+                    await websocket.send_json(error_dict("INFERENCE_ERROR", error_msg))
                     await websocket.close(code=1011)
                     return
 

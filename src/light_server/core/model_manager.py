@@ -24,9 +24,14 @@ from litserve import LitAPI
 logger = logging.getLogger(__name__)
 
 
-class QueueFullError(Exception):
-    """Raised when a model's request queue is at capacity."""
-    pass
+from light_server.core.exceptions import (
+    InferenceTimeoutError,
+    ModelNotFoundError,
+    ModelNotReadyError,
+    QueueFullError,
+    ValidationError,
+    WorkerCrashedError,
+)
 
 
 class ModelManager:
@@ -212,7 +217,7 @@ class ModelManager:
         target = (self.repo_path / name).resolve()
         repo = self.repo_path.resolve()
         if not str(target).startswith(str(repo) + os.sep) and target != repo:
-            raise ValueError(f"model path escapes repository: {target}")
+            raise ValidationError(f"model path escapes repository: {target}")
         return target
 
     def load(self, name: str, version: str = "1", config_override: ModelConfig | None = None) -> bool:
@@ -233,7 +238,7 @@ class ModelManager:
         try:
             validate_model_name(name)
             validate_version(version)
-        except ValueError as exc:
+        except ValidationError as exc:
             logger.warning(f"Invalid model name or version: {exc}")
             return False
 
@@ -425,7 +430,7 @@ class ModelManager:
             validate_model_name(name)
             if version is not None:
                 validate_version(version)
-        except ValueError as exc:
+        except ValidationError as exc:
             logger.warning(f"Invalid model name or version: {exc}")
             return False
 
@@ -602,17 +607,17 @@ class ModelManager:
         if version is None:
             version = self.registry.get_active_version(name)
             if version is None:
-                raise RuntimeError(f"Model {name} has no active version")
+                raise ModelNotFoundError(f"Model {name} has no active version")
 
         if not self.registry.is_ready(name, version):
-            raise RuntimeError(f"Model {name} version {version} is not ready")
+            raise ModelNotReadyError(f"Model {name} version {version} is not ready")
 
         worker_queues = self.registry.get_worker_queues(name, version)
         if worker_queues is None:
             # Fallback: backward compat for tests that only set a single queue
             q = self.registry.get_queue(name, version)
             if q is None:
-                raise RuntimeError(f"Model {name} version {version} has no request queues")
+                raise ModelNotFoundError(f"Model {name} version {version} has no request queues")
             uid = self._next_uid(name, version)
             entry = self.registry.get(name, version)
             max_batch_size = (entry.get("config") or {}).get("max_batch_size", 1) if entry else 1
@@ -656,14 +661,14 @@ class ModelManager:
         if version is None:
             version = self.registry.get_active_version(name)
             if version is None:
-                raise RuntimeError(f"Model {name} has no active version")
+                raise ModelNotFoundError(f"Model {name} has no active version")
 
         if not self.registry.is_ready(name, version):
-            raise RuntimeError(f"Model {name} version {version} is not ready")
+            raise ModelNotReadyError(f"Model {name} version {version} is not ready")
 
         worker_queues = self.registry.get_worker_queues(name, version)
         if worker_queues is None:
-            raise RuntimeError(f"Model {name} version {version} has no request queues")
+            raise ModelNotFoundError(f"Model {name} version {version} has no request queues")
 
         key = self._worker_key(name, version)
         worker_id = self._pick_worker_least_loaded(key)
@@ -697,11 +702,11 @@ class ModelManager:
 
         worker_id = self._stream_routing.get(stream_id)
         if worker_id is None:
-            raise RuntimeError(f"Stream {stream_id} is not open")
+            raise ModelNotFoundError(f"Stream {stream_id} is not open")
 
         worker_queues = self.registry.get_worker_queues(name, version)
         if worker_queues is None or worker_id >= len(worker_queues):
-            raise RuntimeError(f"Model {name} worker queues unavailable")
+            raise ModelNotFoundError(f"Model {name} worker queues unavailable")
 
         q = worker_queues[worker_id]
         uid = self._next_uid(name, version)
@@ -788,7 +793,7 @@ class ModelManager:
         try:
             validate_model_name(name)
             validate_version(version)
-        except ValueError as exc:
+        except ValidationError as exc:
             logger.warning(f"Invalid model name or version: {exc}")
             return False
         with self._model_lock:
@@ -801,7 +806,7 @@ class ModelManager:
         """Read model-level config from model_repo/{name}/model_config.yaml."""
         try:
             validate_model_name(name)
-        except ValueError as exc:
+        except ValidationError as exc:
             logger.warning(f"Invalid model name: {exc}")
             return {}
         import yaml
@@ -919,12 +924,12 @@ class ModelManager:
         status_dict = self._workers_setup_status.get(key, {})
         while time.time() - start < timeout:
             if not all(w.is_alive() for w in workers):
-                raise RuntimeError("One or more workers died during startup")
+                raise WorkerCrashedError("One or more workers died during startup")
             ready_count = sum(1 for v in status_dict.values() if v == "ready")
             if ready_count > 0:
                 return
             time.sleep(0.1)
-        raise TimeoutError("Workers did not become ready in time")
+        raise InferenceTimeoutError("Workers did not become ready in time")
 
 
 def _scan_files(model_dir: Path, patterns: list[str]) -> dict[str, float]:

@@ -139,7 +139,7 @@ class TestRaceCondition:
                     mgr.infer("test_model", {"x": 1})
                 except Exception as e:
                     # QueueFullError or RuntimeError are acceptable during unload
-                    from light_server.core.model_manager import QueueFullError
+                    from light_server.core.exceptions import QueueFullError
                     if isinstance(e, QueueFullError):
                         continue
                     if "not ready" in str(e).lower():

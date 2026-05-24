@@ -2,18 +2,39 @@
 
 from __future__ import annotations
 
-import asyncio
 import inspect
+import logging
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
+from light_server.core.exceptions import LightServerError
+from light_server.core.response import error_response
 from light_server.core.server import LightServer
+
+logger = logging.getLogger(__name__)
+
+
+async def lightserver_exception_handler(request: Request, exc: LightServerError) -> JSONResponse:
+    """Handle all LightServerError subclasses with a standardized JSON envelope."""
+    return error_response(exc)
+
+
+async def fallback_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all for unhandled exceptions; returns a generic 500 envelope."""
+    logger.exception("Unhandled exception")
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": "INTERNAL_ERROR", "message": "Internal server error"}},
+    )
 
 
 def create_app(server: LightServer) -> FastAPI:
     app = FastAPI(title="Light Server", version="0.1.0")
+
+    app.add_exception_handler(LightServerError, lightserver_exception_handler)
+    app.add_exception_handler(Exception, fallback_exception_handler)
 
     # 1. Register dynamic endpoints from model_repo/*_endpoint.py
     endpoints = server.model_manager.load_dynamic_endpoints()

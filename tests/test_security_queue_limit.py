@@ -7,9 +7,9 @@ import multiprocessing as mp
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException
 
-from light_server.core.model_manager import ModelManager, QueueFullError
+from light_server.core.exceptions import QueueFullError
+from light_server.core.model_manager import ModelManager
 from light_server.core.registry import ModelRegistry
 
 
@@ -88,7 +88,7 @@ class TestHTTPQueueLimit:
         from light_server.http.handlers import _do_litapi_infer
         from light_server.core.server import LightServer
         from light_server.config import Config
-        from light_server.core.model_manager import QueueFullError
+        from light_server.core.exceptions import QueueFullError
 
         config = Config()
         config.grpc.enabled = False
@@ -100,7 +100,7 @@ class TestHTTPQueueLimit:
             QueueFullError("Queue full")
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(QueueFullError) as exc_info:
             loop = asyncio.new_event_loop()
             try:
                 loop.run_until_complete(
@@ -109,13 +109,13 @@ class TestHTTPQueueLimit:
             finally:
                 loop.close()
         assert exc_info.value.status_code == 429
-        assert "full" in exc_info.value.detail.lower()
+        assert "full" in str(exc_info.value).lower()
 
     def test_ws_stream_handler_closes_on_queue_full(self):
         from light_server.http.handlers import _do_ws_stream
         from light_server.core.server import LightServer
         from light_server.config import Config
-        from light_server.core.model_manager import QueueFullError
+        from light_server.core.exceptions import QueueFullError
         from fastapi import WebSocket
 
         config = Config()

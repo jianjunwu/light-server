@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
+from fastapi import WebSocket
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
+from light_server.core.exceptions import ValidationError
 from light_server.core.validation import validate_model_name, validate_version
 from light_server.core.model_manager import ModelManager
 from light_server.core.registry import ModelRegistry
@@ -34,7 +38,7 @@ class TestValidationFunctions:
             "model.name",  # dot not allowed in model name
         ]
         for name in invalid:
-            with pytest.raises(ValueError):
+            with pytest.raises(ValidationError):
                 validate_model_name(name)
 
     def test_valid_versions(self):
@@ -51,7 +55,7 @@ class TestValidationFunctions:
             "x" * 33,
         ]
         for v in invalid:
-            with pytest.raises(ValueError):
+            with pytest.raises(ValidationError):
                 validate_version(v)
 
 
@@ -81,10 +85,10 @@ class TestModelManagerPathBoundary:
         base = mgr._resolve_model_base("my_model")
         assert str(base).startswith(str(tmp_path.resolve()))
 
-        # Path traversal should raise ValueError
-        with pytest.raises(ValueError):
+        # Path traversal should raise ValidationError
+        with pytest.raises(ValidationError):
             mgr._resolve_model_base("../outside")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             mgr._resolve_model_base("model/../../outside")
 
 
@@ -92,8 +96,6 @@ class TestModelManagerPathBoundary:
 # Integration tests for HTTP handlers (call async functions directly
 # because TestClient normalises %2F away)
 # ------------------------------------------------------------------
-
-import asyncio
 
 
 class TestHTTPPathTraversal:
@@ -117,7 +119,7 @@ class TestHTTPPathTraversal:
 
     def test_infer_handler_rejects_traversal_name(self, server):
         from light_server.http.handlers import _do_infer
-        from fastapi import Request, HTTPException
+        from fastapi import Request
 
         async def mock_json():
             return {"x": 1}
@@ -125,13 +127,13 @@ class TestHTTPPathTraversal:
         req = MagicMock(spec=Request)
         req.json = mock_json
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             self._run(_do_infer(server, "../../etc/passwd", None, req))
         assert exc_info.value.status_code == 400
 
     def test_infer_handler_rejects_traversal_version(self, server):
         from light_server.http.handlers import _do_infer
-        from fastapi import Request, HTTPException
+        from fastapi import Request
 
         async def mock_json():
             return {"x": 1}
@@ -139,13 +141,12 @@ class TestHTTPPathTraversal:
         req = MagicMock(spec=Request)
         req.json = mock_json
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             self._run(_do_infer(server, "my_model", "../../../etc", req))
         assert exc_info.value.status_code == 400
 
     def test_ws_stream_handler_rejects_traversal_name(self, server):
         from light_server.http.handlers import _do_ws_stream
-        from fastapi import WebSocket
 
         called = {}
 
@@ -164,7 +165,7 @@ class TestHTTPPathTraversal:
 
     def test_admin_load_rejects_traversal(self, server):
         from light_server.http.admin import create_admin_routes
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI
 
         app = FastAPI()
         create_admin_routes(app, server)
@@ -172,7 +173,7 @@ class TestHTTPPathTraversal:
         # Call the route function directly
         for route in app.routes:
             if getattr(route, "path", None) == "/v2/repository/models/{model_name}/load":
-                with pytest.raises(HTTPException) as exc_info:
+                with pytest.raises(ValidationError) as exc_info:
                     self._run(route.endpoint("../../etc", "1"))
                 assert exc_info.value.status_code == 400
                 return
@@ -180,14 +181,14 @@ class TestHTTPPathTraversal:
 
     def test_admin_unload_rejects_traversal(self, server):
         from light_server.http.admin import create_admin_routes
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI
 
         app = FastAPI()
         create_admin_routes(app, server)
 
         for route in app.routes:
             if getattr(route, "path", None) == "/v2/repository/models/{model_name}/unload":
-                with pytest.raises(HTTPException) as exc_info:
+                with pytest.raises(ValidationError) as exc_info:
                     self._run(route.endpoint("../../etc", "1"))
                 assert exc_info.value.status_code == 400
                 return
@@ -195,14 +196,14 @@ class TestHTTPPathTraversal:
 
     def test_admin_activate_rejects_traversal(self, server):
         from light_server.http.admin import create_admin_routes
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI
 
         app = FastAPI()
         create_admin_routes(app, server)
 
         for route in app.routes:
             if getattr(route, "path", None) == "/v2/models/{model_name}/versions/{version}/activate":
-                with pytest.raises(HTTPException) as exc_info:
+                with pytest.raises(ValidationError) as exc_info:
                     self._run(route.endpoint("../../etc", "1"))
                 assert exc_info.value.status_code == 400
                 return
@@ -210,14 +211,14 @@ class TestHTTPPathTraversal:
 
     def test_admin_ready_rejects_traversal(self, server):
         from light_server.http.admin import create_admin_routes
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI
 
         app = FastAPI()
         create_admin_routes(app, server)
 
         for route in app.routes:
             if getattr(route, "path", None) == "/v2/models/{model_name}/ready":
-                with pytest.raises(HTTPException) as exc_info:
+                with pytest.raises(ValidationError) as exc_info:
                     self._run(route.endpoint("../../etc", None))
                 assert exc_info.value.status_code == 400
                 return
@@ -225,14 +226,14 @@ class TestHTTPPathTraversal:
 
     def test_admin_versions_rejects_traversal(self, server):
         from light_server.http.admin import create_admin_routes
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI
 
         app = FastAPI()
         create_admin_routes(app, server)
 
         for route in app.routes:
             if getattr(route, "path", None) == "/v2/models/{model_name}/versions":
-                with pytest.raises(HTTPException) as exc_info:
+                with pytest.raises(ValidationError) as exc_info:
                     self._run(route.endpoint("../../etc"))
                 assert exc_info.value.status_code == 400
                 return

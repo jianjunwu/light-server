@@ -14,6 +14,7 @@ from typing import Any
 
 import grpc
 
+from light_server.core.exceptions import LightServerError
 from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
 from litserve.utils import LitAPIStatus
 
@@ -83,6 +84,10 @@ class InferenceServicer(litserve_pb2_grpc.InferenceServicer):
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details(f"Invalid JSON payload: {e}")
             return litserve_pb2.PredictResponse()
+        except LightServerError as e:
+            context.set_code(getattr(grpc.StatusCode, e.grpc_code, grpc.StatusCode.INTERNAL))
+            context.set_details(str(e))
+            return litserve_pb2.PredictResponse()
         except Exception as e:
             logger.exception(f"gRPC Predict error: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -136,6 +141,9 @@ class InferenceServicer(litserve_pb2_grpc.InferenceServicer):
         except json.JSONDecodeError as e:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details(f"Invalid JSON payload: {e}")
+        except LightServerError as e:
+            context.set_code(getattr(grpc.StatusCode, e.grpc_code, grpc.StatusCode.INTERNAL))
+            context.set_details(str(e))
         except Exception as e:
             logger.exception(f"gRPC StreamPredict error: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
@@ -267,6 +275,9 @@ class InferenceServicer(litserve_pb2_grpc.InferenceServicer):
         except json.JSONDecodeError as e:
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             context.set_details(f"Invalid JSON payload: {e}")
+        except LightServerError as e:
+            context.set_code(getattr(grpc.StatusCode, e.grpc_code, grpc.StatusCode.INTERNAL))
+            context.set_details(str(e))
         except Exception as e:
             logger.exception(f"gRPC BidirectionalStream error: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)

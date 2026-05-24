@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from light_server.core.exceptions import EnsembleError, InferenceTimeoutError, ModelNotReadyError
 from litserve.utils import LitAPIStatus, ResponseBufferItem
 
 if TYPE_CHECKING:
@@ -173,7 +174,7 @@ class EnsembleExecutor:
 
             for step, result in zip(layer, results):
                 if isinstance(result, Exception):
-                    raise RuntimeError(
+                    raise EnsembleError(
                         f"Ensemble step '{step.name}' failed: {result}"
                     ) from result
                 context[step.name] = result
@@ -206,7 +207,7 @@ class EnsembleExecutor:
                     await asyncio.sleep(1.5)
 
             if not server.registry.is_ready(step.model, step.version):
-                raise RuntimeError(
+                raise ModelNotReadyError(
                     f"Sub-model {step.model} v{step.version} is not ready"
                 )
 
@@ -227,7 +228,7 @@ class EnsembleExecutor:
                 response_data, status = response_item.response
 
                 if status == LitAPIStatus.ERROR:
-                    raise RuntimeError(
+                    raise EnsembleError(
                         f"Step '{step.name}' inference error"
                     )
 
@@ -235,7 +236,7 @@ class EnsembleExecutor:
 
             except asyncio.TimeoutError:
                 server.response_buffer.pop(uid, None)
-                raise TimeoutError(f"Step '{step.name}' timed out")
+                raise InferenceTimeoutError(f"Step '{step.name}' timed out")
         finally:
             latency = time.time() - start
             metrics = getattr(server, "system_metrics", None)

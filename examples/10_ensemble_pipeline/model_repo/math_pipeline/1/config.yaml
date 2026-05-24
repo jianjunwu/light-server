@@ -1,0 +1,21 @@
+name: math_pipeline
+ensemble:
+  steps:
+    - name: square
+      model: square
+      version: "1"
+      inputs:
+        x: "$request.x"
+
+    - name: double
+      model: double
+      version: "1"
+      inputs:
+        x: "$request.x"
+
+    - name: combine
+      model: combine
+      version: "1"
+      inputs:
+        a: "$square.result"
+        b: "$double.result"

@@ -15,6 +15,7 @@
 | 7️⃣ | [`07_batching_speedup`](07_batching_speedup/) | 30 秒 | 自适应批处理如何让吞吐提升数倍 |
 | 8️⃣ | [`08_grpc_client`](08_grpc_client/) | 30 秒 | gRPC 高性能调用，对比 HTTP REST 延迟 |
 | 9️⃣ | [`09_openai_compatible`](09_openai_compatible/) | 30 秒 | 将响应实时转换为 OpenAI Chat Completions 格式 |
+| 🔟 | [`10_ensemble_pipeline`](10_ensemble_pipeline/) | 30 秒 | DAG 多模型流水线编排、层内并行、层间串行 |
 
 > 每个示例都包含 `./run.sh` 一键运行脚本，无需手动配置。
 
@@ -35,6 +36,9 @@
 ### 协议与生态
 - [`08_grpc_client`](08_grpc_client/) — gRPC 调用与延迟对比
 - [`09_openai_compatible`](09_openai_compatible/) — OpenAI 格式适配
+
+### 流水线编排
+- [`10_ensemble_pipeline`](10_ensemble_pipeline/) — DAG 多模型流水线、层内并行、层间串行
 
 ### 部署与运维
 - [`02_advanced`](02_advanced/) — 版本管理、热重载、自定义指标
@@ -62,3 +66,4 @@ cd examples/XX_name
 | [`07_batching_speedup`](07_batching_speedup/) | 自适应批处理、aiohttp 压测 | `aiohttp` |
 | [`08_grpc_client`](08_grpc_client/) | gRPC 推理端点、延迟对比 | `grpcio` |
 | [`09_openai_compatible`](09_openai_compatible/) | OpenAI 格式适配 | `requests` |
+| [`10_ensemble_pipeline`](10_ensemble_pipeline/) | DAG 流水线编排、多模型并行串行 | 无 |

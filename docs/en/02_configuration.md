@@ -134,9 +134,12 @@ workers_per_device: 2
 
 When the same field is defined in multiple places, priority from high to low:
 
-1. **Model-level `config.yaml`** (highest priority)
-2. **Global `server.yaml` `models` field**
-3. **Global `server.yaml` `server` field** (defaults)
+1. **Version-level `config.yaml`** (highest priority)
+2. **Model-level `model_config.yaml`** — loading policy and version strategy
+3. **Global `server.yaml` `models` field**
+4. **Global `server.yaml` `server` field** (defaults)
+
+> See [Model Management](09_model_management.md) for details on `model_config.yaml`, version policies, and ensemble pipelines.
 
 ## Environment Variables
 

@@ -46,6 +46,8 @@ class ProjectGenerator:
         self._write(root / "test_request.py", self._render_test_request(model_name))
         self._write(root / "README.md", self._render_readme(model_name))
         self._write(root / ".github" / "workflows" / "ci.yml", self._render_ci_yml())
+        self._write(root / "requirements.txt", self._render_requirements_txt())
+        self._write(root / ".gitignore", self._render_gitignore())
 
         # Model files
         self._write(root / "model_repo" / model_name / "1" / "model.py", self._render_model_py())
@@ -161,9 +163,7 @@ CMD ["light-server", "serve", "--config", "server.yaml"]
 '''
 
     def _render_docker_compose(self) -> str:
-        return '''version: "3.8"
-
-services:
+        return '''services:
   server:
     build: .
     ports:
@@ -177,7 +177,8 @@ services:
 '''
 
     def _render_makefile(self) -> str:
-        return '''.PHONY: serve test benchmark clean
+        model_name = self.options.get("model_name", "my_model")
+        return f'''.PHONY: serve test benchmark clean
 
 serve:
 	light-server serve --config server.yaml
@@ -186,38 +187,72 @@ test:
 	python test_request.py
 
 benchmark:
-	light-server benchmark --model my_model --duration 30
+	light-server benchmark --model {model_name} --duration 30
 
 clean:
 	rm -rf __pycache__ .pytest_cache *.log
 '''
 
     def _render_test_request(self, model_name: str) -> str:
+        batch = self.options.get("batch", False)
+        stream = self.options.get("stream", False)
+
+        extra_tests = ""
+        if batch:
+            extra_tests += f'''
+def test_batch():
+    """Send a batch of requests."""
+    payloads = [
+        {{"input": "hello world"}},
+        {{"input": "batch request 2"}},
+        {{"input": "batch request 3"}},
+    ]
+    for payload in payloads:
+        resp = requests.post(URL, json=payload)
+        print(f"Batch item status: {{resp.status_code}}, response: {{resp.json()}}")
+'''
+        if stream:
+            extra_tests += f'''
+def test_stream():
+    """Test streaming endpoint."""
+    payload = {{"input": "hello world", "stream": True}}
+    resp = requests.post(URL, json=payload, stream=True)
+    print(f"Stream status: {{resp.status_code}}")
+    for line in resp.iter_lines():
+        if line:
+            print(f"Stream chunk: {{line.decode()}}")
+'''
+
+        extra_calls = ""
+        if batch:
+            extra_calls += "    test_batch()\n"
+        if stream:
+            extra_calls += "    test_stream()\n"
+
         return f'''"""Test script for the {model_name} model."""
 
 import requests
 
-URL = "http://127.0.0.1:8000/v2/models/{model_name}/infer"
+BASE_URL = "http://127.0.0.1:8000"
+URL = f"{{BASE_URL}}/v2/models/{model_name}/infer"
 
 
 def test_infer():
-    payload = {{
-        "input": "hello world",
-    }}
+    payload = {{"input": "hello world"}}
     resp = requests.post(URL, json=payload)
     print(f"Status: {{resp.status_code}}")
     print(f"Response: {{resp.json()}}")
 
 
 def test_health():
-    resp = requests.get(f"http://127.0.0.1:8000/v2/models/{model_name}/ready")
+    resp = requests.get(f"{{BASE_URL}}/v2/models/{model_name}/ready")
     print(f"Ready: {{resp.status_code}}")
-
+{extra_tests}
 
 if __name__ == "__main__":
     test_health()
     test_infer()
-'''
+{extra_calls}'''
 
     def _render_readme(self, model_name: str) -> str:
         proj = self.project_name
@@ -275,7 +310,8 @@ python test_request.py
 """
 
     def _render_ci_yml(self) -> str:
-        return '''name: CI
+        model_name = self.options.get("model_name", "my_model")
+        return f'''name: CI
 
 on:
   push:
@@ -293,7 +329,90 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: |
-          pip install light-server
+          pip install -r requirements.txt
       - name: Validate config
         run: light-server config-check server.yaml
+      - name: Lint model code
+        run: |
+          python -m py_compile model_repo/{model_name}/1/model.py
+'''
+
+    def _render_requirements_txt(self) -> str:
+        template = self.template
+        lines = ["light-server"]
+        if template in ("llm", "nlp"):
+            lines.extend([
+                "",
+                "# Add your model-specific dependencies below",
+                "# transformers",
+                "# torch",
+            ])
+        elif template in ("cv-classify", "cv-detect"):
+            lines.extend([
+                "",
+                "# Add your model-specific dependencies below",
+                "# Pillow",
+                "# torch",
+                "# torchvision",
+            ])
+        else:
+            lines.extend([
+                "",
+                "# Add your model-specific dependencies below",
+            ])
+        return "\n".join(lines) + "\n"
+
+    def _render_gitignore(self) -> str:
+        return '''# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model artifacts
+*.pt
+*.pth
+*.onnx
+*.trt
+*.engine
+model_repo/**/checkpoints/
+model_repo/**/weights/
 '''

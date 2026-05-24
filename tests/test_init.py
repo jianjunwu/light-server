@@ -38,6 +38,8 @@ class TestProjectGenerator:
         assert (root / ".github" / "workflows" / "ci.yml").exists()
         assert (root / "model_repo" / "my_model" / "1" / "model.py").exists()
         assert (root / "model_repo" / "my_model" / "1" / "config.yaml").exists()
+        assert (root / "requirements.txt").exists()
+        assert (root / ".gitignore").exists()
 
     def test_generate_all_templates(self, tmp_workspace: Path):
         for template in ProjectGenerator.TEMPLATES:
@@ -116,6 +118,74 @@ class TestProjectGenerator:
         assert '"light-server", "serve", "--config", "server.yaml"' in df
         assert "EXPOSE 8000" in df
 
+    def test_docker_compose_no_version(self, tmp_workspace: Path):
+        gen = ProjectGenerator(
+            project_name="dc",
+            template="empty",
+            output_dir=str(tmp_workspace),
+        )
+        root = gen.generate()
+        dc = (root / "docker-compose.yml").read_text()
+        assert "version:" not in dc
+        assert "services:" in dc
+
+    def test_makefile_uses_model_name(self, tmp_workspace: Path):
+        gen = ProjectGenerator(
+            project_name="mk",
+            template="empty",
+            output_dir=str(tmp_workspace),
+            options={"model_name": "custom_m"},
+        )
+        root = gen.generate()
+        mf = (root / "Makefile").read_text()
+        assert "light-server benchmark --model custom_m" in mf
+
+    def test_test_request_with_batch_and_stream(self, tmp_workspace: Path):
+        gen = ProjectGenerator(
+            project_name="tr",
+            template="empty",
+            output_dir=str(tmp_workspace),
+            options={"model_name": "m", "batch": True, "stream": True},
+        )
+        root = gen.generate()
+        tr = (root / "test_request.py").read_text()
+        assert "def test_batch()" in tr
+        assert "def test_stream()" in tr
+
+    def test_requirements_txt(self, tmp_workspace: Path):
+        gen = ProjectGenerator(
+            project_name="req",
+            template="cv-classify",
+            output_dir=str(tmp_workspace),
+        )
+        root = gen.generate()
+        req = (root / "requirements.txt").read_text()
+        assert "light-server" in req
+        assert "# Pillow" in req
+
+    def test_gitignore_content(self, tmp_workspace: Path):
+        gen = ProjectGenerator(
+            project_name="git",
+            template="empty",
+            output_dir=str(tmp_workspace),
+        )
+        root = gen.generate()
+        gi = (root / ".gitignore").read_text()
+        assert "__pycache__/" in gi
+        assert ".venv/" in gi
+
+    def test_ci_yml_includes_lint(self, tmp_workspace: Path):
+        gen = ProjectGenerator(
+            project_name="ci",
+            template="empty",
+            output_dir=str(tmp_workspace),
+            options={"model_name": "ci_model"},
+        )
+        root = gen.generate()
+        ci = (root / ".github" / "workflows" / "ci.yml").read_text()
+        assert "py_compile" in ci
+        assert "ci_model" in ci
+
     def test_readme_contains_project_name(self, tmp_workspace: Path):
         gen = ProjectGenerator(
             project_name="named_proj",
@@ -128,6 +198,32 @@ class TestProjectGenerator:
         assert "named_proj" in readme
         assert "gpt_demo" in readme
         assert "llm" in readme
+
+
+class TestConfigModels:
+    def test_load_config_with_models_section(self, tmp_workspace: Path):
+        from light_server.config import load_config
+
+        yaml_path = tmp_workspace / "server.yaml"
+        yaml_path.write_text("""
+server:
+  http_port: 9000
+model_repository:
+  path: ./model_repo
+load_models:
+  - my_model
+models:
+  - name: my_model
+    max_batch_size: 8
+    batch_timeout: 0.05
+    stream: true
+""")
+        config = load_config(yaml_path)
+        assert len(config.models) == 1
+        assert config.models[0].name == "my_model"
+        assert config.models[0].max_batch_size == 8
+        assert config.models[0].batch_timeout == 0.05
+        assert config.models[0].stream is True
 
 
 class TestCLInit:

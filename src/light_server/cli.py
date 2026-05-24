@@ -76,12 +76,9 @@ def _init_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("project_name", nargs="?", help="Project directory name")
     parser.add_argument("--template", "-t", default="empty", choices=["empty", "llm", "cv-classify", "cv-detect", "nlp"], help="Project template")
     parser.add_argument("--model-name", "-m", default="my_model", help="Model name")
-    parser.add_argument("--grpc", action="store_true", default=True, help="Enable gRPC (default: true)")
-    parser.add_argument("--no-grpc", action="store_true", help="Disable gRPC")
-    parser.add_argument("--metrics", action="store_true", default=True, help="Enable metrics (default: true)")
-    parser.add_argument("--no-metrics", action="store_true", help="Disable metrics")
-    parser.add_argument("--webui", action="store_true", default=True, help="Enable Web UI (default: true)")
-    parser.add_argument("--no-webui", action="store_true", help="Disable Web UI")
+    parser.add_argument("--grpc", action=argparse.BooleanOptionalAction, default=True, help="Enable or disable gRPC (default: true)")
+    parser.add_argument("--metrics", action=argparse.BooleanOptionalAction, default=True, help="Enable or disable metrics (default: true)")
+    parser.add_argument("--webui", action=argparse.BooleanOptionalAction, default=True, help="Enable or disable Web UI (default: true)")
     parser.add_argument("--batch", action="store_true", help="Enable dynamic batching")
     parser.add_argument("--stream", action="store_true", help="Enable streaming responses")
     parser.add_argument("--output-dir", "-o", default=".", help="Output directory for the project")
@@ -365,15 +362,11 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
     if args.project_name:
         # Non-interactive mode
-        grpc = not args.no_grpc if args.no_grpc else args.grpc
-        metrics = not args.no_metrics if args.no_metrics else args.metrics
-        webui = not args.no_webui if args.no_webui else args.webui
-
         options = {
             "model_name": args.model_name,
-            "grpc": grpc,
-            "metrics": metrics,
-            "webui": webui,
+            "grpc": args.grpc,
+            "metrics": args.metrics,
+            "webui": args.webui,
             "batch": args.batch,
             "stream": args.stream,
         }

@@ -59,6 +59,7 @@ class ModelRepositoryConfig:
 
 @dataclass
 class ModelConfig:
+    name: str = ""
     api_path: str = "/predict"
     max_batch_size: int = 1
     batch_timeout: float = 0.0
@@ -87,6 +88,7 @@ class Config:
     model_repository: ModelRepositoryConfig = field(default_factory=ModelRepositoryConfig)
     load_models: list[str] = field(default_factory=list)
     webui: WebUIConfig = field(default_factory=WebUIConfig)
+    models: list[ModelConfig] = field(default_factory=list)
 
 
 def _to_dataclass(data: dict[str, Any], cls: type) -> Any:
@@ -123,6 +125,8 @@ def load_config(path: str | Path) -> Config:
         config.load_models = raw["load_models"]
     if "webui" in raw:
         config.webui = _to_dataclass(raw["webui"], WebUIConfig)
+    if "models" in raw:
+        config.models = [_to_dataclass(m, ModelConfig) for m in raw["models"]]
 
     # Expand environment variables in paths
     config.model_repository.path = os.path.expandvars(config.model_repository.path)

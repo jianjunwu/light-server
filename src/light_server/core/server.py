@@ -164,6 +164,9 @@ class LightServer:
         elif mode in ("explicit", "poll"):
             names_to_load = self.config.load_models
 
+        # Build lookup from config.models for per-model overrides
+        config_override_by_name = {m.name: m for m in self.config.models if getattr(m, "name", None)}
+
         for name in names_to_load:
             model_cfg = self.model_manager.get_model_config(name)
             load_policy = model_cfg.get("load_policy", "explicit" if mode in ("explicit", "poll") else "all")
@@ -172,6 +175,8 @@ class LightServer:
 
             models = by_model.get(name, [])
             versions_loaded = []
+
+            override = config_override_by_name.get(name)
 
             for m in models:
                 version = m["version"]
@@ -183,7 +188,7 @@ class LightServer:
                     should_load = version in versions_to_load if versions_to_load else True
 
                 if should_load:
-                    self.model_manager.load(name, version)
+                    self.model_manager.load(name, version, config_override=override)
                     versions_loaded.append(version)
 
             # Ensure default_version is active if specified and loaded

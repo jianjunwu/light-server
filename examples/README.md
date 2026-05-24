@@ -16,6 +16,7 @@
 | 8️⃣ | [`08_grpc_client`](08_grpc_client/) | 30 秒 | gRPC 高性能调用，对比 HTTP REST 延迟 |
 | 9️⃣ | [`09_openai_compatible`](09_openai_compatible/) | 30 秒 | 将响应实时转换为 OpenAI Chat Completions 格式 |
 | 🔟 | [`10_ensemble_pipeline`](10_ensemble_pipeline/) | 30 秒 | DAG 多模型流水线编排、层内并行、层间串行 |
+| 1️⃣1️⃣ | [`11_hooks_and_endpoints`](11_hooks_and_endpoints/) | 30 秒 | 模型生命周期 Hooks + 动态端点 — 请求/响应拦截 + 自定义路由 |
 
 > 每个示例都包含 `./run.sh` 一键运行脚本，无需手动配置。
 
@@ -44,6 +45,9 @@
 - [`02_advanced`](02_advanced/) — 版本管理、热重载、自定义指标
 - [`05_docker`](05_docker/) — Dockerfile + docker-compose
 
+### 扩展与定制
+- [`11_hooks_and_endpoints`](11_hooks_and_endpoints/) — 模型级 Hooks（on_request / on_response / health_check）+ 动态端点注册
+
 ## 🏃 快速运行任意示例
 
 ```bash
@@ -67,3 +71,4 @@ cd examples/XX_name
 | [`08_grpc_client`](08_grpc_client/) | gRPC 推理端点、延迟对比 | `grpcio` |
 | [`09_openai_compatible`](09_openai_compatible/) | OpenAI 格式适配 | `requests` |
 | [`10_ensemble_pipeline`](10_ensemble_pipeline/) | DAG 流水线编排、多模型并行串行 | 无 |
+| [`11_hooks_and_endpoints`](11_hooks_and_endpoints/) | 模型生命周期 Hooks + 动态端点 | 无 |

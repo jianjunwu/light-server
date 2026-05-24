@@ -285,6 +285,8 @@ model_repo/
 | [`07_batching_speedup`](examples/07_batching_speedup/) | Batching 加速对比 — 用数据展示吞吐飞跃 |
 | [`08_grpc_client`](examples/08_grpc_client/) | gRPC 高性能调用 — 对比 HTTP REST 延迟 |
 | [`09_openai_compatible`](examples/09_openai_compatible/) | OpenAI 格式适配 — 响应实时转换 |
+| [`10_ensemble_pipeline`](examples/10_ensemble_pipeline/) | DAG 多模型流水线编排、层内并行、层间串行 |
+| [`11_hooks_and_endpoints`](examples/11_hooks_and_endpoints/) | 模型生命周期 Hooks + 动态端点 — 请求/响应拦截 + 自定义路由 |
 
 每个示例都包含 `run.sh` 一键运行脚本和 `test_model.py` 模型逻辑验证。
 

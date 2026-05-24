@@ -190,6 +190,120 @@ hot_reload_patterns:
 
 After modifying `model.py` or `config.yaml`, the model is automatically reloaded without restarting the server.
 
+## Model Lifecycle Hooks
+
+A LitAPI subclass can **optionally** implement three hooks that run before/after inference and during readiness checks.
+
+### on_request — Before Enqueue
+
+```python
+def on_request(self, payload, request_meta):
+    """Called in the main process before the request is queued."""
+    headers = request_meta.get("headers", {})
+    auth = headers.get("authorization", "anonymous")
+    payload["_auth"] = auth
+    return payload
+```
+
+**`request_meta` contains:**
+
+| Field | Description |
+|-------|-------------|
+| `headers` | Request headers dict |
+| `query_params` | URL query parameters |
+| `client_host` | Client IP address |
+| `method` | HTTP method (GET/POST/...) |
+| `url` | Full request URL |
+| `path_params` | `{"model_name": ..., "version": ...}` |
+
+### on_response — Before Returning to Client
+
+```python
+def on_response(self, response, response_meta):
+    """Called in the main process after the worker responds, before sending to client."""
+    response["_meta"] = {
+        "model_name": response_meta.get("model_name"),
+        "version": response_meta.get("version"),
+        "status": response_meta.get("status"),
+    }
+    return response
+```
+
+**`response_meta` contains:**
+
+| Field | Description |
+|-------|-------------|
+| `model_name` | Model name |
+| `version` | Version string |
+| `request_meta` | Original metadata injected by `on_request` |
+| `status` | `"ok"` or `"error"` |
+
+### health_check — Model-Level Health Probe
+
+```python
+def health_check(self):
+    """Called by GET /v2/models/{name}/ready."""
+    return {"status": "healthy", "gpu": 0.5}
+```
+
+The returned dict is attached to the `/ready` response under `model_status`. If an exception is raised, it is gracefully caught and returned as `{"status": "error", "error": "..."}`.
+
+> All hooks are optional. Behavior is identical to standard LitAPI when not implemented.
+
+See [`examples/11_hooks_and_endpoints`](../../examples/11_hooks_and_endpoints/) for a complete example.
+
+---
+
+## Dynamic Endpoints (Custom Routes)
+
+Place `*_endpoint.py` files in the `model_repo` root to auto-register them as FastAPI routes.
+
+### Naming Convention
+
+The file stem (without `_endpoint.py`) becomes the route path:
+
+| Filename | Route |
+|----------|-------|
+| `health_endpoint.py` | `GET /health` (overrides default) |
+| `status_endpoint.py` | `GET /status` |
+| `webhook_endpoint.py` | `GET /webhook` |
+
+### Basic Handler
+
+```python
+# model_repo/health_endpoint.py
+def handler(request, server):
+    return {"status": "ok", "custom": True}
+```
+
+### Custom HTTP Methods
+
+```python
+# model_repo/webhook_endpoint.py
+methods = ["POST"]
+
+def handler(request, server):
+    return {"received": True}
+```
+
+### Async Handler
+
+```python
+# model_repo/status_endpoint.py
+async def handler(request, server):
+    loaded = server.registry.list_loaded()
+    return {"models": loaded}
+```
+
+### Handler Arguments
+
+- `request` — FastAPI `Request` object; you can call `await request.json()`, `request.headers`, etc.
+- `server` — `LightServer` instance; access `registry`, `model_manager`, `config`, etc.
+
+See [`examples/11_hooks_and_endpoints`](../../examples/11_hooks_and_endpoints/) for a complete example.
+
+---
+
 ## Auxiliary Modules
 
 `.py` files in the same directory as `model.py` can be imported:

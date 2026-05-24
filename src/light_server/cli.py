@@ -86,6 +86,7 @@ def _init_args(parser: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="light-server", description="Light Server - Triton-style deployment on LitServe")
+    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     # serve
@@ -134,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_init(args)
 
     parser.print_help()
-    return 1
+    return 0
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:

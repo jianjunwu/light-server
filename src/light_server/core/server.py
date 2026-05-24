@@ -147,7 +147,10 @@ class LightServer:
         if self.config.model_repository.control_mode == "poll":
             self._start_poll_thread()
 
-        self._start_http()
+        try:
+            self._start_http()
+        finally:
+            self.shutdown()
 
     def _load_initial_models(self) -> None:
         mode = self.config.model_repository.control_mode
@@ -294,6 +297,10 @@ class LightServer:
         Prometheus multiproc directories. This is called automatically on
         SIGINT/SIGTERM, or can be invoked programmatically.
         """
+        if getattr(self, "_shutdown_done", False):
+            return
+        self._shutdown_done = True
+
         logger.info("Shutting down LightServer...")
         self.response_buffer.stop()
         # Unload all loaded models by iterating through the registry
@@ -304,7 +311,11 @@ class LightServer:
         for workers in self.model_manager._workers.values():
             for worker in workers:
                 if worker.is_alive():
+                    worker.terminate()
                     worker.join(timeout=2)
+                    if worker.is_alive():
+                        worker.kill()
+                        worker.join(timeout=1)
 
         # Release shared memory buffers before shutting down other services
         self.model_manager.shutdown()

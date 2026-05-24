@@ -543,6 +543,7 @@ class ModelManager:
                 worker.join(timeout=5)
                 if worker.is_alive():
                     worker.kill()
+                    worker.join(timeout=2)
             except Exception as e:
                 logger.error(f"Error terminating worker for {name} v{version}: {e}")
 
@@ -819,6 +820,13 @@ class ModelManager:
     def shutdown(self) -> None:
         """Release all shared memory and other resources."""
         self._shm_buffer.shutdown()
+        # Shut down the multiprocessing Manager to prevent orphan processes
+        if hasattr(self, "_setup_manager") and self._setup_manager is not None:
+            try:
+                self._setup_manager.shutdown()
+            except Exception:
+                pass
+            self._setup_manager = None
 
     def _enforce_max_versions(self, name: str) -> None:
         """Unload oldest versions if max_loaded_versions is exceeded."""

@@ -87,4 +87,9 @@ def create_app(server: LightServer) -> FastAPI:
         from light_server.webui.routes import create_ui_routes
         create_ui_routes(app, server)
 
+    @app.on_event("shutdown")
+    async def _on_shutdown() -> None:
+        """Trigger LightServer shutdown when uvicorn begins graceful shutdown."""
+        server.shutdown()
+
     return app

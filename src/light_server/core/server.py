@@ -307,17 +307,32 @@ class LightServer:
         for entry in self.registry.list_loaded():
             self.model_manager.unload(entry["name"], entry["version"])
 
-        # Wait for all worker processes to fully exit before shutting down manager
-        for workers in self.model_manager._workers.values():
+        # Close transport queues to unblock the response consumer
+        try:
+            self.transport._closed = True
+        except Exception:
+            pass
+        for q in getattr(self.transport, "_queues", []):
+            try:
+                q.close()
+                q.join_thread()
+            except Exception:
+                pass
+
+        # Wait for all worker processes to fully exit (join even if not alive to reap zombies)
+        for workers in list(self.model_manager._workers.values()):
             for worker in workers:
-                if worker.is_alive():
-                    worker.terminate()
-                    worker.join(timeout=2)
+                try:
+                    if worker.is_alive():
+                        worker.terminate()
+                    worker.join(timeout=3)
                     if worker.is_alive():
                         worker.kill()
-                        worker.join(timeout=1)
+                        worker.join(timeout=2)
+                except Exception:
+                    pass
 
-        # Release shared memory buffers before shutting down other services
+        # Release shared memory buffers and manager process
         self.model_manager.shutdown()
 
         if self._grpc_server:

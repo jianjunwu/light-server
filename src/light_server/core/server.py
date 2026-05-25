@@ -54,10 +54,11 @@ class LightServer:
     def __init__(self, config: Config):
         self.config = config
         self.registry = ModelRegistry()
+        self._mp_ctx = mp.get_context("spawn")
 
         # Shared transport using native multiprocessing.Queue (no Manager IPC)
         num_consumers = 1
-        transport_queues = [mp.Queue() for _ in range(num_consumers)]
+        transport_queues = [self._mp_ctx.Queue() for _ in range(num_consumers)]
         self.transport = MPQueueTransport(None, transport_queues)
 
         # Metrics: setup prometheus multiprocess mode before any metric creation
@@ -99,7 +100,7 @@ class LightServer:
         if not log_cfg.info_output and not log_cfg.error_output:
             return
 
-        self._log_queue = mp.Queue()
+        self._log_queue = self._mp_ctx.Queue()
 
         from light_server.logging.consumer import LogConsumer
         from light_server.logging.queue_handler import MPQueueHandler

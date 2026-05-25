@@ -71,6 +71,7 @@ class ModelManager:
         self._artifact_model_paths: dict[str, Path] = {}
         # Small manager only for worker setup status (low-frequency, tiny data)
         self._setup_manager = mp.Manager()
+        self._mp_ctx = mp.get_context("spawn")
         # Atomic uid counters: one per model+version to avoid global lock contention
         self._uid_counters: dict[str, itertools.count] = {}
         self._uid_lock = threading.Lock()
@@ -369,7 +370,7 @@ class ModelManager:
                 devices = 1
             total_workers = devices * workers_per_device
             max_queue_size = model_config.get("max_queue_size", 1000)
-            worker_queues = [mp.Queue(maxsize=max_queue_size) for _ in range(total_workers)]
+            worker_queues = [self._mp_ctx.Queue(maxsize=max_queue_size) for _ in range(total_workers)]
             self.registry.set_worker_queues(name, version, worker_queues)
             # Backward-compat: also set the legacy single queue (points to worker 0)
             self.registry.set_queue(name, version, worker_queues[0])
@@ -914,8 +915,7 @@ class ModelManager:
             device = device_list[worker_id % len(device_list)]
             workers_setup_status[f"{key}_{worker_id}"] = "starting"
 
-            ctx = mp.get_context("spawn")
-            p = ctx.Process(
+            p = self._mp_ctx.Process(
                 target=_inference_worker_wrapper,
                 args=(name, version, model_py_path, config, device, worker_id, worker_queues[worker_id], self.transport, workers_setup_status, self.log_queue),
                 name=f"inference-worker-{name}-{version}-{worker_id}",

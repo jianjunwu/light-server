@@ -20,52 +20,59 @@ from light_server.core.exceptions import (
     QueueFullError,
     WorkerCrashedError,
 )
+from light_server.core.model_manager import (
+    submit_infer,
+    submit_stream_cancel,
+    submit_stream_chunk,
+    submit_stream_close,
+    submit_stream_open,
+)
 from light_server.core.response import error_dict
-from light_server.core.server import LightServer
 from light_server.core.validation import validate_model_name, validate_version
+from light_server.http.state import HTTPState
 from litserve.utils import LitAPIStatus, LoopResponseType, ResponseBufferItem
 
 logger = logging.getLogger(__name__)
 
 
-def create_inference_routes(app: FastAPI, server: LightServer) -> None:
+def create_inference_routes(app: FastAPI, state: HTTPState) -> None:
     """Register inference routes on the FastAPI app."""
 
     @app.on_event("startup")
     async def start_response_consumer() -> None:
         """Start background task to consume responses from transport."""
-        asyncio.create_task(_response_consumer(server))
+        asyncio.create_task(_response_consumer(state))
 
     @app.post("/v2/models/{model_name}/infer")
     async def infer(model_name: str, request: Request) -> JSONResponse:
         """Inference against the active version of a model."""
-        return await _do_infer(server, model_name, None, request)
+        return await _do_infer(state, model_name, None, request)
 
     @app.post("/v2/models/{model_name}/versions/{version}/infer")
     async def infer_version(model_name: str, version: str, request: Request) -> JSONResponse:
         """Inference against a specific version of a model."""
-        return await _do_infer(server, model_name, version, request)
+        return await _do_infer(state, model_name, version, request)
 
     @app.websocket("/v2/models/{model_name}/stream")
     async def ws_stream(model_name: str, websocket: WebSocket) -> None:
-        await _do_ws_stream(server, model_name, None, websocket)
+        await _do_ws_stream(state, model_name, None, websocket)
 
     @app.websocket("/v2/models/{model_name}/versions/{version}/stream")
     async def ws_stream_version(model_name: str, version: str, websocket: WebSocket) -> None:
-        await _do_ws_stream(server, model_name, version, websocket)
+        await _do_ws_stream(state, model_name, version, websocket)
 
 
-async def _do_infer(server: LightServer, model_name: str, version: str | None, request: Request) -> JSONResponse:
+async def _do_infer(state: HTTPState, model_name: str, version: str | None, request: Request) -> JSONResponse:
     validate_model_name(model_name)
     if version is not None:
         validate_version(version)
 
-    resolved_version = version or server.registry.get_active_version(model_name) or "unknown"
-    server.system_metrics.record_request_start(model_name, resolved_version)
+    resolved_version = version or state.registry.get_active_version(model_name) or "unknown"
+    state.system_metrics.record_request_start(model_name, resolved_version)
 
     status = "2xx"
     try:
-        if not server.registry.is_ready(model_name, version):
+        if not state.registry.is_ready(model_name, version):
             status = "4xx"
             detail = f"Model {model_name}"
             if version:
@@ -86,15 +93,15 @@ async def _do_infer(server: LightServer, model_name: str, version: str | None, r
         }
 
         # Call model-level on_request hook if available
-        lit_api = server.model_manager.get_litapi(model_name, resolved_version)
+        lit_api = state.get_litapi_hooks(model_name, resolved_version)
         if lit_api is not None and hasattr(lit_api, "on_request"):
             payload = lit_api.on_request(payload, request_meta)
 
-        entry = server.registry.get(model_name, version)
+        entry = state.registry.get(model_name, version)
         if entry is not None and entry.get("model_type") == "ensemble":
-            result = await _do_ensemble_infer(server, model_name, version, payload)
+            result = await _do_ensemble_infer(state, model_name, version, payload)
         else:
-            result = await _do_litapi_infer(server, model_name, version, payload, request_meta)
+            result = await _do_litapi_infer(state, model_name, version, payload, request_meta)
 
         return result
 
@@ -108,14 +115,14 @@ async def _do_infer(server: LightServer, model_name: str, version: str | None, r
         status = "5xx"
         raise
     finally:
-        server.system_metrics.record_request_end(model_name, resolved_version, status)
+        state.system_metrics.record_request_end(model_name, resolved_version, status)
 
 
 async def _do_ensemble_infer(
-    server: LightServer, model_name: str, version: str | None, payload: dict[str, Any]
+    state: HTTPState, model_name: str, version: str | None, payload: dict[str, Any]
 ) -> JSONResponse:
     """Execute an ensemble DAG and return the final step's output."""
-    entry = server.registry.get(model_name, version)
+    entry = state.registry.get(model_name, version)
     if entry is None:
         raise ModelNotReadyError(f"Model {model_name} not found")
 
@@ -125,7 +132,7 @@ async def _do_ensemble_infer(
 
     try:
         executor = EnsembleExecutor()
-        result = await executor.execute(server, ensemble_config, payload, ensemble_name=model_name)
+        result = await executor.execute(state, ensemble_config, payload, ensemble_name=model_name)
         return JSONResponse(result)
     except LightServerError:
         raise
@@ -135,7 +142,7 @@ async def _do_ensemble_infer(
 
 
 async def _do_litapi_infer(
-    server: LightServer,
+    state: HTTPState,
     model_name: str,
     version: str | None,
     payload: dict[str, Any],
@@ -144,22 +151,28 @@ async def _do_litapi_infer(
     """Submit inference to a LitAPI worker and await response."""
     uid = None
     try:
-        uid = server.model_manager.infer(
-            model_name, payload, version=version, response_queue_id=0
+        uid = submit_infer(
+            state.registry,
+            state.shm_buffer,
+            state.system_metrics,
+            model_name,
+            payload,
+            version=version,
+            response_queue_id=state.response_queue_id,
         )
 
         event = asyncio.Event()
-        server.response_buffer[uid] = ResponseBufferItem(event=event)
+        state.response_buffer[uid] = ResponseBufferItem(event=event)
 
         await asyncio.wait_for(
-            event.wait(), timeout=server.config.server.timeout
+            event.wait(), timeout=state.config.server.timeout
         )
 
-        response_item = server.response_buffer.pop(uid)
+        response_item = state.response_buffer.pop(uid)
         response_data, status = response_item.response
 
         # Call model-level on_response hook if available
-        lit_api = server.model_manager.get_litapi(model_name, version)
+        lit_api = state.get_litapi_hooks(model_name, version)
         if lit_api is not None and hasattr(lit_api, "on_response"):
             response_meta = {
                 "model_name": model_name,
@@ -180,10 +193,10 @@ async def _do_litapi_infer(
     except QueueFullError:
         raise
     except asyncio.TimeoutError:
-        server.response_buffer.pop(uid, None)
+        state.response_buffer.pop(uid, None)
         raise InferenceTimeoutError("Inference timeout")
     except asyncio.CancelledError:
-        server.response_buffer.pop(uid, None)
+        state.response_buffer.pop(uid, None)
         raise
     except LightServerError:
         raise
@@ -192,12 +205,12 @@ async def _do_litapi_infer(
         raise WorkerCrashedError(str(e)) from e
     finally:
         if uid is not None:
-            resolved_version = version or server.registry.get_active_version(model_name) or "unknown"
-            server.system_metrics.dec_queue_depth(model_name, resolved_version)
+            resolved_version = version or state.registry.get_active_version(model_name) or "unknown"
+            state.system_metrics.dec_queue_depth(model_name, resolved_version)
 
 
 async def _do_ws_stream(
-    server: LightServer, model_name: str, version: str | None, websocket: WebSocket
+    state: HTTPState, model_name: str, version: str | None, websocket: WebSocket
 ) -> None:
     """Handle a bidirectional WebSocket stream."""
     try:
@@ -210,13 +223,13 @@ async def _do_ws_stream(
 
     await websocket.accept()
 
-    resolved_version = version or server.registry.get_active_version(model_name) or "unknown"
-    server.system_metrics.record_request_start(model_name, resolved_version)
+    resolved_version = version or state.registry.get_active_version(model_name) or "unknown"
+    state.system_metrics.record_request_start(model_name, resolved_version)
 
     stream_id: str | None = None
     status = "2xx"
     try:
-        if not server.registry.is_ready(model_name, version):
+        if not state.registry.is_ready(model_name, version):
             status = "4xx"
             await websocket.close(code=1011, reason=f"Model {model_name} not ready")
             return
@@ -225,24 +238,31 @@ async def _do_ws_stream(
 
         event = asyncio.Event()
         buffer_item = ResponseBufferItem(event=event, response_queue=deque())
-        server.response_buffer[stream_id] = buffer_item
+        state.response_buffer[stream_id] = buffer_item
 
         try:
-            server.model_manager.infer_stream_open(
-                model_name, stream_id, version=version, response_queue_id=0
+            submit_stream_open(
+                state.registry,
+                state._stream_routing,
+                state._stream_lock,
+                state._worker_loads,
+                model_name,
+                stream_id,
+                version=version,
+                response_queue_id=state.response_queue_id,
             )
         except QueueFullError as exc:
-            server.response_buffer.pop(stream_id, None)
+            state.response_buffer.pop(stream_id, None)
             await websocket.close(code=1011, reason=str(exc))
             return
-        server.system_metrics.record_stream_open(model_name, resolved_version, "websocket", stream_id)
+        state.system_metrics.record_stream_open(model_name, resolved_version, "websocket", stream_id)
 
         sender_task = asyncio.create_task(
-            _ws_sender(websocket, buffer_item, stream_id, server, model_name, resolved_version),
+            _ws_sender(websocket, buffer_item, stream_id, state, model_name, resolved_version),
             name=f"ws-sender-{stream_id}",
         )
         receiver_task = asyncio.create_task(
-            _ws_receiver(websocket, server, model_name, stream_id, version),
+            _ws_receiver(websocket, state, model_name, stream_id, version),
             name=f"ws-receiver-{stream_id}",
         )
 
@@ -274,20 +294,28 @@ async def _do_ws_stream(
             pass
     finally:
         if stream_id is not None:
-            server.system_metrics.record_stream_close(model_name, resolved_version, "websocket", stream_id)
+            state.system_metrics.record_stream_close(model_name, resolved_version, "websocket", stream_id)
             try:
-                server.model_manager.infer_stream_close(model_name, stream_id, version=version)
+                submit_stream_close(
+                    state.registry,
+                    state._stream_routing,
+                    state._worker_loads,
+                    model_name,
+                    stream_id,
+                    version=version,
+                    response_queue_id=state.response_queue_id,
+                )
             except Exception:
                 pass
-            server.response_buffer.pop(stream_id, None)
-        server.system_metrics.record_request_end(model_name, resolved_version, status)
+            state.response_buffer.pop(stream_id, None)
+        state.system_metrics.record_request_end(model_name, resolved_version, status)
 
 
 async def _ws_sender(
     websocket: WebSocket,
     buffer_item: ResponseBufferItem,
     stream_id: str,
-    server: LightServer,
+    state: HTTPState,
     model_name: str,
     version: str,
 ) -> None:
@@ -312,7 +340,7 @@ async def _ws_sender(
                     await websocket.close(code=1011)
                     return
 
-                server.system_metrics.record_stream_chunk(model_name, version, "websocket", stream_id)
+                state.system_metrics.record_stream_chunk(model_name, version, "websocket", stream_id)
 
                 if isinstance(response_data, bytes):
                     await websocket.send_bytes(response_data)
@@ -331,14 +359,20 @@ async def _ws_sender(
 
 
 async def _ws_receiver(
-    websocket: WebSocket, server: LightServer, model_name: str, stream_id: str, version: str | None
+    websocket: WebSocket, state: HTTPState, model_name: str, stream_id: str, version: str | None
 ) -> None:
     """Receive input chunks from the WebSocket client and forward to the worker."""
     try:
         while True:
             message = await websocket.receive_json()
-            server.model_manager.infer_stream_chunk(
-                model_name, stream_id, message, version=version, response_queue_id=0
+            submit_stream_chunk(
+                state.registry,
+                state._stream_routing,
+                model_name,
+                stream_id,
+                message,
+                version=version,
+                response_queue_id=state.response_queue_id,
             )
     except WebSocketDisconnect:
         pass
@@ -346,19 +380,20 @@ async def _ws_receiver(
         logger.warning(f"WebSocket receiver error for stream {stream_id}: {e}")
 
 
-async def _response_consumer(server: LightServer) -> None:
+async def _response_consumer(state: HTTPState) -> None:
     """Continuously read responses from transport and signal waiting handlers."""
-    transport = server.transport
+    transport = state.transport
+    consumer_id = state.response_queue_id
     while True:
         try:
-            result = await transport.areceive(consumer_id=0)
+            result = await transport.areceive(consumer_id=consumer_id)
             if result is None:
                 continue
 
             # Format: (uid, (response_data, status, response_type, worker_id))
             uid, (response_data, status, response_type, worker_id) = result
 
-            response_item = server.response_buffer.get(uid)
+            response_item = state.response_buffer.get(uid)
             if response_item is None:
                 continue
 

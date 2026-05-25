@@ -6,7 +6,9 @@ import asyncio
 import logging
 import multiprocessing as mp
 import os
+import queue
 import signal
+import socket
 import sys
 import threading
 import time
@@ -21,6 +23,7 @@ from light_server.config import Config, ModelConfig
 from light_server.core.model_manager import ModelManager
 from light_server.core.registry import ModelRegistry
 from light_server.core.response_buffer import TTLResponseBuffer
+from light_server.http.state import HTTPState
 from light_server.observability import setup_multiproc_metrics, SystemMetrics
 from litserve.transport.process_transport import MPQueueTransport
 from litserve.utils import ResponseBufferItem
@@ -32,7 +35,7 @@ class LightServer:
     """Orchestrates HTTP, gRPC, metrics, and model lifecycle.
 
     This is the top-level controller that wires together all subsystems:
-    - HTTP server (FastAPI + uvicorn, workers=1)
+    - HTTP server (FastAPI + uvicorn, single or multi-process)
     - Optional gRPC server
     - Optional Prometheus metrics server
     - Model registry and model manager for load/unload/infer
@@ -53,12 +56,15 @@ class LightServer:
 
     def __init__(self, config: Config):
         self.config = config
-        self.registry = ModelRegistry()
+        self._manager = mp.Manager()
+        self.registry = ModelRegistry(manager=self._manager)
         self._mp_ctx = mp.get_context("spawn")
 
-        # Shared transport using native multiprocessing.Queue (no Manager IPC)
-        num_consumers = 1
-        transport_queues = [self._mp_ctx.Queue() for _ in range(num_consumers)]
+        # Determine HTTP worker count (1 = single-process, >1 = multi-process)
+        self._num_http_workers = config.server.http_workers or 1
+
+        # Shared transport: one consumer queue per HTTP worker
+        transport_queues = [self._mp_ctx.Queue() for _ in range(self._num_http_workers)]
         self.transport = MPQueueTransport(None, transport_queues)
 
         # Metrics: setup prometheus multiprocess mode before any metric creation
@@ -75,6 +81,7 @@ class LightServer:
             transport=self.transport,
             log_queue=self._log_queue,
             system_metrics=self.system_metrics,
+            manager=self._manager,
         )
 
         self._shutdown_event = threading.Event()
@@ -90,10 +97,24 @@ class LightServer:
         self.http_app = self._build_http_app()
         self._grpc_server: Any = None
         self._metrics_server: Any = None
+        self._http_worker_procs: list[mp.Process] = []
+        self._admin_queue: Any | None = None
 
     def _build_http_app(self) -> FastAPI:
         from light_server.http.app import create_app
-        return create_app(self)
+        state = HTTPState(
+            registry=self.registry,
+            transport=self.transport,
+            config=self.config,
+            response_queue_id=0,
+            repo_path=Path(self.config.model_repository.path),
+            log_queue=self._log_queue,
+            metrics_dir=self._metrics_dir,
+            model_manager=self.model_manager,
+            response_buffer=self.response_buffer,
+        )
+        state.init_worker_locals()
+        return create_app(state, shutdown_callback=self.shutdown)
 
     def _setup_logging(self) -> None:
         log_cfg = self.config.logging
@@ -202,6 +223,13 @@ class LightServer:
                     self.registry.activate_version(name, default_version)
 
     def _start_http(self) -> None:
+        if self._num_http_workers <= 1:
+            self._start_http_single()
+        else:
+            self._start_http_multi(self._num_http_workers)
+
+    def _start_http_single(self) -> None:
+        """Single-process HTTP mode (backward compatible)."""
         host = self.config.server.host
         port = self.config.server.http_port
         log_level = self.config.server.log_level
@@ -221,6 +249,91 @@ class LightServer:
             server.run()
         except Exception as e:
             logger.exception(f"HTTP server error: {e}")
+
+    def _start_http_multi(self, num_workers: int) -> None:
+        """Multi-process HTTP mode with shared socket and per-worker state."""
+        host = self.config.server.host
+        port = self.config.server.http_port
+
+        # Bind a single socket in the main process; workers share the fd
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError as exc:
+            logger.error(f"Failed to bind HTTP socket to {host}:{port}: {exc}")
+            return
+        sock.listen(128)
+
+        # Admin IPC queues (shared command queue + per-worker response queues)
+        self._admin_queue = self._manager.Queue()
+        admin_response_queues = [self._manager.Queue() for _ in range(num_workers)]
+
+        # Spawn worker processes
+        self._http_worker_procs = []
+        for i in range(num_workers):
+            state = HTTPState(
+                registry=self.registry,
+                transport=self.transport,
+                config=self.config,
+                response_queue_id=i,
+                repo_path=Path(self.config.model_repository.path),
+                log_queue=self._log_queue,
+                admin_queue=self._admin_queue,
+                admin_response_queue=admin_response_queues[i],
+                metrics_dir=self._metrics_dir,
+            )
+            p = self._mp_ctx.Process(
+                target=_http_worker_entry,
+                args=(state, sock),
+                name=f"http-worker-{i}",
+            )
+            p.start()
+            self._http_worker_procs.append(p)
+            logger.info(f"Started HTTP worker {i} (pid={p.pid})")
+
+        # Start admin command loop in a daemon thread
+        self._start_admin_loop()
+
+        logger.info(f"HTTP server listening on {host}:{port} with {num_workers} workers")
+
+        # Block until shutdown or all workers die
+        try:
+            while not self._shutdown_event.is_set():
+                alive = [p for p in self._http_worker_procs if p.is_alive()]
+                if not alive:
+                    logger.warning("All HTTP workers have exited")
+                    break
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            sock.close()
+
+    def _start_admin_loop(self) -> None:
+        """Consume admin commands from HTTP workers and execute them in the main process."""
+        def loop() -> None:
+            while not self._shutdown_event.is_set():
+                try:
+                    cmd = self._admin_queue.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                try:
+                    cmd_type = cmd["cmd"]
+                    response_queue = cmd["response_queue"]
+                    if cmd_type == "load":
+                        success = self.model_manager.load(cmd["name"], cmd["version"])
+                        response_queue.put({"success": success})
+                    elif cmd_type == "unload":
+                        success = self.model_manager.unload(cmd["name"], cmd.get("version"))
+                        response_queue.put({"success": success})
+                    else:
+                        response_queue.put({"success": False, "error": f"Unknown cmd: {cmd_type}"})
+                except Exception as exc:
+                    logger.exception(f"Admin loop error: {exc}")
+
+        t = threading.Thread(target=loop, daemon=True, name="admin-loop")
+        t.start()
 
     def _start_grpc(self) -> None:
         try:
@@ -294,10 +407,10 @@ class LightServer:
     def shutdown(self) -> None:
         """Gracefully shut down all services.
 
-        Stops the response buffer, unloads all models (terminating workers),
-        shuts down gRPC / metrics / logging servers, and cleans up temporary
-        Prometheus multiproc directories. This is called automatically on
-        SIGINT/SIGTERM, or can be invoked programmatically.
+        Stops the response buffer, terminates HTTP workers (if any),
+        unloads all models (terminating inference workers), shuts down
+        gRPC / metrics / logging servers, and cleans up temporary
+        Prometheus multiproc directories.
         """
         with self._shutdown_lock:
             if getattr(self, "_shutdown_done", False):
@@ -306,6 +419,20 @@ class LightServer:
 
         logger.info("Shutting down LightServer...")
         self.response_buffer.stop()
+
+        # Terminate HTTP worker processes first
+        for p in list(self._http_worker_procs):
+            try:
+                if p.is_alive():
+                    p.terminate()
+                p.join(timeout=3)
+                if p.is_alive():
+                    p.kill()
+                    p.join(timeout=2)
+            except Exception:
+                pass
+        self._http_worker_procs.clear()
+
         # Unload all loaded models by iterating through the registry
         for entry in self.registry.list_loaded():
             self.model_manager.unload(entry["name"], entry["version"])
@@ -322,7 +449,7 @@ class LightServer:
             except Exception:
                 pass
 
-        # Wait for all worker processes to fully exit (join even if not alive to reap zombies)
+        # Wait for all inference worker processes to fully exit
         for workers in list(self.model_manager._workers.values()):
             for worker in workers:
                 try:
@@ -352,3 +479,13 @@ class LightServer:
             except OSError as e:
                 logger.warning(f"Failed to clean up metrics dir {self._metrics_dir}: {e}")
         logger.info("Shutdown complete")
+
+
+def _http_worker_entry(state: HTTPState, sock: socket.socket) -> None:
+    """Top-level entry point for HTTP worker processes.
+
+    Must be a module-level function so ``spawn`` can import it.
+    Delegates to :func:`light_server.http.worker.http_worker_main`.
+    """
+    from light_server.http.worker import http_worker_main
+    http_worker_main(state, sock)

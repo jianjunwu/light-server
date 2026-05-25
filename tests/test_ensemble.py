@@ -107,6 +107,8 @@ def test_ensemble_end_to_end(model_repo):
     import asyncio
     import threading
 
+    import light_server.core.model_manager as _mm_mod
+
     _m, registry, _t, mm = _create_test_env(model_repo)
 
     assert mm.load("my_ensemble", version="1")
@@ -115,49 +117,51 @@ def test_ensemble_end_to_end(model_repo):
 
     call_log: list[tuple[str, str | None, dict[str, Any]]] = []
 
-    class MockModelManager:
-        def infer(self, name, payload, version=None, response_queue_id=0):
-            call_log.append((name, version, dict(payload)))
-            uid = f"uid-{len(call_log)}"
-            result = {"output": payload["input"] ** 2} if version == "1" else {"output": payload["input"] ** 3}
-
-            def respond():
-                item = server.response_buffer.get(uid)
-                if item is not None:
-                    item.response = (result, LitAPIStatus.OK)
-                    loop.call_soon_threadsafe(item.event.set)
-
-            threading.Timer(0.05, respond).start()
-            return uid
-
-        def load(self, name, version="1"):
-            return True
-
     class MockRegistry:
         def is_ready(self, name, version=None):
             return True
 
-    class MockServerConfig:
-        timeout = 10
-
     class MockConfig:
-        server = MockServerConfig()
+        server = type("C", (), {"timeout": 10})()
 
-    class MockServer:
-        pass
+    class MockState:
+        registry = MockRegistry()
+        shm_buffer = None
+        system_metrics = None
+        response_buffer: dict[str, Any] = {}
+        config = MockConfig()
+        response_queue_id = 0
 
-    server = MockServer()
-    server.model_manager = MockModelManager()
-    server.registry = MockRegistry()
-    server.config = MockConfig()
-    server.response_buffer = {}
+        async def load_model(self, name, version):
+            return True
+
+    state = MockState()
+
+    # Patch submit_infer so we can intercept calls and inject responses
+    _orig_submit_infer = _mm_mod.submit_infer
+
+    def _mock_submit_infer(registry, shm_buffer, system_metrics, name, payload, version=None, response_queue_id=0):
+        call_log.append((name, version, dict(payload)))
+        uid = f"uid-{len(call_log)}"
+        result = {"output": payload["input"] ** 2} if version == "1" else {"output": payload["input"] ** 3}
+
+        def respond():
+            item = state.response_buffer.get(uid)
+            if item is not None:
+                item.response = (result, LitAPIStatus.OK)
+                loop.call_soon_threadsafe(item.event.set)
+
+        threading.Timer(0.05, respond).start()
+        return uid
+
+    _mm_mod.submit_infer = _mock_submit_infer
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     async def run():
         executor = EnsembleExecutor()
-        result = await executor.execute(server, ensemble_config, {"value": 2.0})
+        result = await executor.execute(state, ensemble_config, {"value": 2.0})
         return result
 
     try:
@@ -168,6 +172,7 @@ def test_ensemble_end_to_end(model_repo):
         assert call_log[0] == ("test_model", "1", {"input": 2.0})
         assert call_log[1] == ("test_model", "2", {"input": 4.0})
     finally:
+        _mm_mod.submit_infer = _orig_submit_infer
         loop.close()
 
     mm.unload("my_ensemble", version="1")
@@ -176,6 +181,9 @@ def test_ensemble_end_to_end(model_repo):
 def test_ensemble_parallel_steps():
     """Independent steps are submitted in parallel via asyncio.gather."""
     import asyncio
+    import threading
+
+    import light_server.core.model_manager as _mm_mod
 
     config = {
         "ensemble": {
@@ -190,26 +198,6 @@ def test_ensemble_parallel_steps():
 
     call_order: list[str] = []
 
-    import threading
-
-    class MockModelManager:
-        def infer(self, name, payload, version=None, response_queue_id=0):
-            uid = f"uid-{len(call_order)}"
-            call_order.append(payload.get("step", "unknown"))
-            result = {"o": payload["x"]}
-
-            def respond():
-                item = server.response_buffer.get(uid)
-                if item is not None:
-                    item.response = (result, LitAPIStatus.OK)
-                    loop.call_soon_threadsafe(item.event.set)
-
-            threading.Timer(0.05, respond).start()
-            return uid
-
-        def load(self, name, version="1"):
-            return True
-
     class MockRegistry:
         def is_ready(self, name, version=None):
             return True
@@ -217,14 +205,37 @@ def test_ensemble_parallel_steps():
     class MockConfig:
         server = type("C", (), {"timeout": 10})()
 
-    class MockServer:
-        pass
+    class MockState:
+        registry = MockRegistry()
+        shm_buffer = None
+        system_metrics = None
+        response_buffer: dict[str, Any] = {}
+        config = MockConfig()
+        response_queue_id = 0
 
-    server = MockServer()
-    server.model_manager = MockModelManager()
-    server.registry = MockRegistry()
-    server.config = MockConfig()
-    server.response_buffer = {}
+        async def load_model(self, name, version):
+            return True
+
+    state = MockState()
+
+    # Patch submit_infer so we can intercept calls and inject responses
+    _orig_submit_infer = _mm_mod.submit_infer
+
+    def _mock_submit_infer(registry, shm_buffer, system_metrics, name, payload, version=None, response_queue_id=0):
+        uid = f"uid-{len(call_order)}"
+        call_order.append(payload.get("step", "unknown"))
+        result = {"o": payload["x"]}
+
+        def respond():
+            item = state.response_buffer.get(uid)
+            if item is not None:
+                item.response = (result, LitAPIStatus.OK)
+                loop.call_soon_threadsafe(item.event.set)
+
+        threading.Timer(0.05, respond).start()
+        return uid
+
+    _mm_mod.submit_infer = _mock_submit_infer
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -232,10 +243,11 @@ def test_ensemble_parallel_steps():
     try:
         executor = EnsembleExecutor()
         result = loop.run_until_complete(
-            executor.execute(server, ensemble_config, {"v": 5.0})
+            executor.execute(state, ensemble_config, {"v": 5.0})
         )
         assert result == {"o": 5.0}
         # a and b are parallel, c is sequential after both
         assert len(call_order) == 3
     finally:
+        _mm_mod.submit_infer = _orig_submit_infer
         loop.close()

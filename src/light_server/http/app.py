@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from light_server.core.exceptions import LightServerError
 from light_server.core.response import error_response
-from light_server.core.server import LightServer
+from light_server.http.state import HTTPState
 
 logger = logging.getLogger(__name__)
 
@@ -30,24 +30,24 @@ async def fallback_exception_handler(request: Request, exc: Exception) -> JSONRe
     )
 
 
-def create_app(server: LightServer) -> FastAPI:
+def create_app(state: HTTPState, shutdown_callback: Callable[[], None] | None = None) -> FastAPI:
     app = FastAPI(title="Light Server", version="0.1.0")
 
     app.add_exception_handler(LightServerError, lightserver_exception_handler)
     app.add_exception_handler(Exception, fallback_exception_handler)
 
     # 1. Register dynamic endpoints from model_repo/*_endpoint.py
-    endpoints = server.model_manager.load_dynamic_endpoints()
+    endpoints = state.load_dynamic_endpoints()
 
     def _wrap_async_handler(h):
         async def _handler(request: Request) -> JSONResponse:
-            result = await h(request, server)
+            result = await h(request, state)
             return JSONResponse(result)
         return _handler
 
     def _wrap_sync_handler(h):
         def _handler(request: Request) -> JSONResponse:
-            result = h(request, server)
+            result = h(request, state)
             return JSONResponse(result)
         return _handler
 
@@ -71,25 +71,26 @@ def create_app(server: LightServer) -> FastAPI:
         return JSONResponse({
             "server": "light-server",
             "version": "0.1.0",
-            "loaded_models": server.registry.list_loaded(),
+            "loaded_models": state.registry.list_loaded(),
         })
 
     # Admin routes
     from light_server.http.admin import create_admin_routes
-    create_admin_routes(app, server)
+    create_admin_routes(app, state)
 
     # Inference routes
     from light_server.http.handlers import create_inference_routes
-    create_inference_routes(app, server)
+    create_inference_routes(app, state)
 
     # Web UI routes (only if enabled)
-    if server.config.webui.enabled:
+    if state.config.webui.enabled:
         from light_server.webui.routes import create_ui_routes
-        create_ui_routes(app, server)
+        create_ui_routes(app, state)
 
     @app.on_event("shutdown")
     async def _on_shutdown() -> None:
-        """Trigger LightServer shutdown when uvicorn begins graceful shutdown."""
-        server.shutdown()
+        """Trigger shutdown callback when uvicorn begins graceful shutdown."""
+        if shutdown_callback is not None:
+            shutdown_callback()
 
     return app

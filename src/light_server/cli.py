@@ -33,6 +33,7 @@ def _serve_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model-repo", help="Model repository path (directory containing models or .lma files)")
     parser.add_argument("--grpc-port", type=int, default=None, help="gRPC port")
     parser.add_argument("--metrics-port", type=int, default=None, help="Metrics port")
+    parser.add_argument("--http-workers", type=int, default=None, help="Number of HTTP worker processes (default: auto)")
     parser.add_argument("--no-grpc", action="store_true", default=None, help="Disable gRPC")
     parser.add_argument("--no-metrics", action="store_true", default=None, help="Disable metrics")
 
@@ -167,6 +168,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
                 workers_per_device=args.workers_per_device or 1,
                 timeout=args.timeout or 30.0,
                 log_level=args.log_level or "info",
+                http_workers=args.http_workers,
             ),
             grpc=GrpcConfig(enabled=not (args.no_grpc or False), max_workers=10),
             metrics=MetricsConfig(enabled=not (args.no_metrics or False)),
@@ -201,6 +203,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         config.server.devices = args.devices
     if args.workers_per_device is not None:
         config.server.workers_per_device = args.workers_per_device
+    if args.http_workers is not None:
+        config.server.http_workers = args.http_workers
     if args.timeout is not None:
         config.server.timeout = args.timeout
     if args.log_level is not None:

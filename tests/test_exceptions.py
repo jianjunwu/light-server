@@ -21,6 +21,7 @@ from light_server.core.exceptions import (
 )
 from light_server.core.response import error_dict, error_response
 from light_server.http.app import create_app
+from light_server.http.state import HTTPState
 from light_server.core.server import LightServer
 from light_server.config import Config
 
@@ -114,12 +115,24 @@ class TestErrorResponse:
 class TestGlobalExceptionHandlers:
     @pytest.fixture
     def client(self):
+        from pathlib import Path
         config = Config()
         config.grpc.enabled = False
         config.metrics.enabled = False
         config.model_repository.path = "/tmp/test_repo"
         server = LightServer(config)
-        app = create_app(server)
+        state = HTTPState(
+            registry=server.registry,
+            transport=server.transport,
+            config=server.config,
+            response_queue_id=0,
+            repo_path=Path(server.config.model_repository.path),
+            log_queue=server._log_queue,
+            metrics_dir=server._metrics_dir,
+            model_manager=server.model_manager,
+        )
+        state.init_worker_locals()
+        app = create_app(state)
         return TestClient(app)
 
     def test_validation_error_returns_400(self, client):

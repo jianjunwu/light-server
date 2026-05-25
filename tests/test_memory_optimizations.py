@@ -13,8 +13,30 @@ from light_server.core.model_manager import ModelManager
 from light_server.core.registry import ModelRegistry
 
 
+class FakeQueue:
+    """Picklable fake queue for testing."""
+
+    def __init__(self, maxsize: int = 0) -> None:
+        self._items: list[Any] = []
+        self._maxsize = maxsize
+
+    def put_nowait(self, item: Any) -> None:
+        if self._maxsize and len(self._items) >= self._maxsize:
+            raise Exception("Queue full")
+        self._items.append(item)
+
+    def put(self, item: Any, timeout: float | None = None) -> None:
+        self.put_nowait(item)
+
+    def get(self) -> Any:
+        return self._items.pop(0)
+
+    def qsize(self) -> int:
+        return len(self._items)
+
+
 class TestAtomicUidCounter:
-    """Verify atomic integer uid generation and cleanup."""
+    """Verify uuid-based uid generation (process-safe, no locks)."""
 
     @pytest.fixture
     def manager(self, tmp_path: Path):
@@ -24,107 +46,87 @@ class TestAtomicUidCounter:
             registry=registry,
         )
 
-    def test_infer_generates_sequential_uids(self, manager: ModelManager):
-        """Uids for the same model should have sequential numbers."""
+    def test_infer_generates_unique_uids(self, manager: ModelManager):
+        """Uids for the same model should all be unique."""
         registry = manager.registry
         registry.register("test_model", "1")
         registry.set_status("test_model", "1", "READY")
         registry.activate_version("test_model", "1")
         # Need a queue for infer() to work
-        mock_queue = MagicMock()
-        registry.set_queue("test_model", "1", mock_queue)
+        fake_queue = FakeQueue()
+        registry.set_queue("test_model", "1", fake_queue)
 
-        uids = [manager.infer("test_model", {"input": i}) for i in range(5)]
+        uids = [manager.infer("test_model", {"input": i}) for i in range(20)]
 
-        # Uid format: {name}_{version}-{seq}-{hex}  (key-seq-hex)
-        seqs = [int(uid.split("-")[1]) for uid in uids]
-        assert seqs == [0, 1, 2, 3, 4]
+        assert len(set(uids)) == len(uids)
 
     def test_infer_unique_across_models(self, manager: ModelManager):
-        """Different models have independent counters, uids remain unique."""
+        """Different models generate independent unique uids."""
         registry = manager.registry
         for name in ("model_a", "model_b"):
             registry.register(name, "1")
             registry.set_status(name, "1", "READY")
             registry.activate_version(name, "1")
-            registry.set_queue(name, "1", MagicMock())
+            registry.set_queue(name, "1", FakeQueue())
 
         uid_a = manager.infer("model_a", {"input": 1})
         uid_b = manager.infer("model_b", {"input": 2})
 
-        # Different models → different counters, both start at 0
         assert uid_a != uid_b
-        assert uid_a.split("-")[1] == "0"
-        assert uid_b.split("-")[1] == "0"
 
     def test_infer_uid_format(self, manager: ModelManager):
-        """Uid format: {name}_{version}-{seq}-{hex_timestamp_suffix}."""
+        """Uid format: {name}_{version}-{uuid}-{timestamp}."""
         registry = manager.registry
         registry.register("my_model", "v2")
         registry.set_status("my_model", "v2", "READY")
         registry.activate_version("my_model", "v2")
-        registry.set_queue("my_model", "v2", MagicMock())
+        registry.set_queue("my_model", "v2", FakeQueue())
 
         uid = manager.infer("my_model", {"input": 1})
-        # Format: {key}-{seq}-{hex} where key = name_version
+        # Format: {name}_{version}-{uuid}-{timestamp}
         parts = uid.split("-")
 
         assert len(parts) == 3
         assert parts[0] == "my_model_v2"  # key part
-        assert parts[1] == "0"  # first sequence number
-        # last part is 8-char hex
-        assert len(parts[2]) == 8
-        int(parts[2], 16)  # valid hex
+        # parts[1] is uuid (32 hex chars)
+        assert len(parts[1]) == 32
+        # parts[2] is monotonic_ns (integer)
+        assert parts[2].isdigit()
 
-    def test_unload_cleans_uid_counter(self, manager: ModelManager):
-        """After unload, the uid counter for that model should be gone."""
+    def test_no_uid_counters_after_infer(self, manager: ModelManager):
+        """With uuid-based uids, no per-model counters are created."""
         registry = manager.registry
         registry.register("test_model", "1")
         registry.set_status("test_model", "1", "READY")
         registry.activate_version("test_model", "1")
-        registry.set_queue("test_model", "1", MagicMock())
+        registry.set_queue("test_model", "1", FakeQueue())
 
-        # Generate a uid to create the counter
+        # Generate a uid - should not create any counter state
+        manager.infer("test_model", {"input": 1})
+        assert not hasattr(manager, "_uid_counters") or not manager._uid_counters
+
+    def test_unload_no_uid_counter_cleanup_needed(self, manager: ModelManager):
+        """After unload, no uid counter cleanup is needed (none exists)."""
+        registry = manager.registry
+        registry.register("test_model", "1")
+        registry.set_status("test_model", "1", "READY")
+        registry.activate_version("test_model", "1")
+        registry.set_queue("test_model", "1", FakeQueue())
+
+        # Generate a uid
         manager.infer("test_model", {"input": 1})
         key = "test_model_1"
-        assert key in manager._uid_counters
 
         # Setup worker for unload
-        mock_worker = MagicMock()
-        mock_worker.is_alive.return_value = False
-        manager._workers[key] = [mock_worker]
-        manager._litapi_instances[key] = MagicMock()
+        class FakeWorker:
+            def is_alive(self):
+                return False
+        class FakeLitAPI:
+            pass
+        manager._workers[key] = [FakeWorker()]
+        manager._litapi_instances[key] = FakeLitAPI()
         manager._workers_setup_status[key] = mp.Manager().dict()
 
         manager.unload("test_model", "1")
-        assert key not in manager._uid_counters
-
-    def test_atomic_counter_faster_than_uuid(self):
-        """Atomic counter core logic should be measurably faster than uuid.uuid4()."""
-        import itertools
-        import time
-        import uuid
-
-        counter = itertools.count()
-
-        # Warm up
-        for _ in range(100):
-            next(counter)
-            str(uuid.uuid4())
-
-        # Atomic counter timing
-        start = time.perf_counter()
-        for _ in range(50000):
-            f"req-{next(counter)}-{0xFFFFFFFF:08x}"
-        atomic_time = time.perf_counter() - start
-
-        # uuid4 timing
-        start = time.perf_counter()
-        for _ in range(50000):
-            str(uuid.uuid4())
-        uuid_time = time.perf_counter() - start
-
-        # Atomic counter should be at least 3x faster
-        assert atomic_time < uuid_time / 3, (
-            f"Atomic uid ({atomic_time:.4f}s) not faster than uuid4 ({uuid_time:.4f}s)"
-        )
+        # No _uid_counters to check - they don't exist in the new design
+        assert key not in getattr(manager, "_workers", {})

@@ -127,7 +127,7 @@ class TestRaceCondition:
         registry.register("test_model", "1", {"max_queue_size": 10}, model_type="litapi")
         registry.set_status("test_model", "1", "READY")
         registry.activate_version("test_model", "1")
-        q = mgr._setup_manager.Queue(maxsize=10)
+        q = mgr._manager.Queue(maxsize=10)
         registry.set_worker_queues("test_model", "1", [q])
         mgr._workers["test_model_1"] = [MagicMock()]
 

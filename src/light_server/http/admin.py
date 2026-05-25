@@ -9,19 +9,19 @@ from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
 from light_server.core.exceptions import ValidationError
-from light_server.core.server import LightServer
 from light_server.core.validation import validate_model_name, validate_version
+from light_server.http.state import HTTPState
 
 logger = logging.getLogger(__name__)
 
 
-def create_admin_routes(app: FastAPI, server: LightServer) -> None:
+def create_admin_routes(app: FastAPI, state: HTTPState) -> None:
     """Register admin routes on the FastAPI app."""
 
     @app.get("/v2/models")
     async def list_models() -> JSONResponse:
         """List loaded models."""
-        models = server.registry.list_loaded()
+        models = state.registry.list_loaded()
         return JSONResponse({"models": models})
 
     @app.get("/v2/models/{model_name}/ready")
@@ -30,8 +30,8 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
         validate_model_name(model_name)
         if version is not None:
             validate_version(version)
-        ready = server.registry.is_ready(model_name, version)
-        active_version = server.registry.get_active_version(model_name)
+        ready = state.registry.is_ready(model_name, version)
+        active_version = state.registry.get_active_version(model_name)
         result: dict[str, Any] = {
             "name": model_name,
             "version": version or active_version,
@@ -39,7 +39,7 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
             "active_version": active_version,
         }
 
-        lit_api = server.model_manager.get_litapi(model_name, version)
+        lit_api = state.get_litapi_hooks(model_name, version)
         if lit_api is not None and hasattr(lit_api, "health_check"):
             try:
                 result["model_status"] = lit_api.health_check()
@@ -53,8 +53,8 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
     async def list_versions(model_name: str) -> JSONResponse:
         """List all loaded versions for a model."""
         validate_model_name(model_name)
-        versions = server.registry.list_versions(model_name)
-        active = server.registry.get_active_version(model_name)
+        versions = state.registry.list_versions(model_name)
+        active = state.registry.get_active_version(model_name)
         return JSONResponse({
             "name": model_name,
             "active_version": active,
@@ -64,7 +64,7 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
     @app.post("/v2/repository/index")
     async def repository_index() -> JSONResponse:
         """List available models in the repository."""
-        models = server.model_manager.list_repository()
+        models = state.list_repository()
         return JSONResponse({"models": models})
 
     @app.post("/v2/repository/models/{model_name}/load")
@@ -72,7 +72,7 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
         """Load a specific version of a model from the repository."""
         validate_model_name(model_name)
         validate_version(version)
-        success = server.model_manager.load(model_name, version=version)
+        success = await state.load_model(model_name, version)
         if success:
             return JSONResponse({
                 "success": True,
@@ -86,7 +86,7 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
         validate_model_name(model_name)
         if version is not None:
             validate_version(version)
-        success = server.model_manager.unload(model_name, version=version)
+        success = await state.unload_model(model_name, version)
         if success:
             msg = f"Model {model_name}"
             if version:
@@ -100,7 +100,7 @@ def create_admin_routes(app: FastAPI, server: LightServer) -> None:
         """Activate a specific version for default inference routing."""
         validate_model_name(model_name)
         validate_version(version)
-        success = server.model_manager.activate(model_name, version)
+        success = await state.activate_model(model_name, version)
         if success:
             return JSONResponse({
                 "success": True,

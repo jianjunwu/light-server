@@ -12,6 +12,7 @@ import pytest
 from light_server.core.model_manager import ModelManager
 from light_server.core.registry import ModelRegistry
 from light_server.http.handlers import _do_litapi_infer
+from light_server.http.state import HTTPState
 from litserve.utils import ResponseBufferItem
 
 
@@ -39,42 +40,59 @@ class TestResponseBufferCleanup:
     """Verify response_buffer entries are cleaned up on all exit paths."""
 
     @pytest.fixture
-    def mock_server(self):
-        server = MagicMock()
-        server.config.server.timeout = 1.0
-        server.response_buffer = {}
-        server.registry.get_active_version.return_value = "1"
-        server.registry.is_ready.return_value = True
-        server.system_metrics = MagicMock()
-        return server
+    def state(self):
+        from light_server.config import Config
+        from light_server.core.server import LightServer
+        from pathlib import Path
 
-    def test_cancelled_error_cleans_response_buffer(self, mock_server):
+        config = Config()
+        config.grpc.enabled = False
+        config.metrics.enabled = False
+        config.model_repository.path = "/tmp/test_repo"
+        config.server.timeout = 1.0
+        server = LightServer(config)
+        http_state = HTTPState(
+            registry=server.registry,
+            transport=server.transport,
+            config=server.config,
+            response_queue_id=0,
+            repo_path=Path(server.config.model_repository.path),
+            log_queue=server._log_queue,
+            metrics_dir=server._metrics_dir,
+            model_manager=server.model_manager,
+        )
+        http_state.init_worker_locals()
+        http_state.registry.register("m", "1", {})
+        http_state.registry.set_status("m", "1", "READY")
+        return http_state
+
+    def test_cancelled_error_cleans_response_buffer(self, state):
         """If the handler is cancelled (client disconnect), uid must be removed."""
         uid = "test-uid-cancel"
-        mock_server.model_manager.infer.return_value = uid
 
         async def _run():
-            with patch("asyncio.Event.wait", side_effect=asyncio.CancelledError):
-                await _do_litapi_infer(mock_server, "m", "1", {"input": 1})
+            with patch("light_server.http.handlers.submit_infer", return_value=uid):
+                with patch("asyncio.Event.wait", side_effect=asyncio.CancelledError):
+                    await _do_litapi_infer(state, "m", "1", {"input": 1})
 
         with pytest.raises(asyncio.CancelledError):
             asyncio.run(_run())
 
-        assert uid not in mock_server.response_buffer
+        assert uid not in state.response_buffer
 
-    def test_timeout_error_cleans_response_buffer(self, mock_server):
+    def test_timeout_error_cleans_response_buffer(self, state):
         """Timeout must pop the uid from response_buffer."""
         uid = "test-uid-timeout"
-        mock_server.model_manager.infer.return_value = uid
 
         async def _run():
-            with patch("asyncio.Event.wait", side_effect=asyncio.TimeoutError):
-                await _do_litapi_infer(mock_server, "m", "1", {"input": 1})
+            with patch("light_server.http.handlers.submit_infer", return_value=uid):
+                with patch("asyncio.Event.wait", side_effect=asyncio.TimeoutError):
+                    await _do_litapi_infer(state, "m", "1", {"input": 1})
 
         with pytest.raises(Exception):  # HTTPException
             asyncio.run(_run())
 
-        assert uid not in mock_server.response_buffer
+        assert uid not in state.response_buffer
 
 
 class TestTeardownHook:

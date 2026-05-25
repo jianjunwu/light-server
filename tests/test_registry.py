@@ -106,10 +106,10 @@ def test_list_loaded_multiple_models():
 def test_set_and_get_queue():
     registry = ModelRegistry()
     registry.register("m1", version="1")
-    fake_queue = object()
+    fake_queue = "fake_queue"
     registry.set_queue("m1", "1", fake_queue)
 
-    assert registry.get_queue("m1", "1") is fake_queue
+    assert registry.get_queue("m1", "1") == fake_queue
 
 
 def test_get_queue_nonexistent():
@@ -120,18 +120,18 @@ def test_get_queue_nonexistent():
 def test_set_and_get_worker_queues():
     registry = ModelRegistry()
     registry.register("m1", version="1")
-    q1, q2 = object(), object()
+    q1, q2 = "q1", "q2"
     registry.set_worker_queues("m1", "1", [q1, q2])
 
-    assert registry.get_worker_queue("m1", "1", 0) is q1
-    assert registry.get_worker_queue("m1", "1", 1) is q2
+    assert registry.get_worker_queue("m1", "1", 0) == q1
+    assert registry.get_worker_queue("m1", "1", 1) == q2
     assert registry.get_worker_queues("m1", "1") == [q1, q2]
 
 
 def test_get_worker_queue_out_of_range():
     registry = ModelRegistry()
     registry.register("m1", version="1")
-    registry.set_worker_queues("m1", "1", [object()])
+    registry.set_worker_queues("m1", "1", ["q1"])
     assert registry.get_worker_queue("m1", "1", 5) is None
 
 
@@ -143,8 +143,8 @@ def test_get_worker_queue_no_queues():
 def test_remove_cleans_queues():
     registry = ModelRegistry()
     registry.register("m1", version="1")
-    registry.set_queue("m1", "1", object())
-    registry.set_worker_queues("m1", "1", [object()])
+    registry.set_queue("m1", "1", "q")
+    registry.set_worker_queues("m1", "1", ["q"])
 
     registry.remove("m1", "1")
     assert registry.get_queue("m1", "1") is None
@@ -261,10 +261,10 @@ def test_get_queue_uses_active_version():
     registry.register("m1", version="1")
     registry.set_status("m1", "1", "READY")
     registry.activate_version("m1", "1")
-    fake_queue = object()
+    fake_queue = "fake_queue"
     registry.set_queue("m1", "1", fake_queue)
 
-    assert registry.get_queue("m1") is fake_queue
+    assert registry.get_queue("m1") == fake_queue
 
 
 def test_get_worker_queues_uses_active_version():
@@ -272,7 +272,7 @@ def test_get_worker_queues_uses_active_version():
     registry.register("m1", version="1")
     registry.set_status("m1", "1", "READY")
     registry.activate_version("m1", "1")
-    queues = [object()]
+    queues = ["q1"]
     registry.set_worker_queues("m1", "1", queues)
 
     assert registry.get_worker_queues("m1") == queues

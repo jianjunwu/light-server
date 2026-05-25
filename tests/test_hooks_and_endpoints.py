@@ -9,9 +9,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import Request
 
+from pathlib import Path
+
 from light_server.core.loader import load_module_from_file
 from light_server.core.model_manager import ModelManager
 from light_server.core.registry import ModelRegistry
+from light_server.http.state import HTTPState
 
 
 # ------------------------------------------------------------------
@@ -113,7 +116,7 @@ class TestGetLitapi:
 
 class TestModelHooks:
     @pytest.fixture
-    def server(self):
+    def state(self):
         from light_server.core.server import LightServer
         from light_server.config import Config
 
@@ -121,7 +124,19 @@ class TestModelHooks:
         config.grpc.enabled = False
         config.metrics.enabled = False
         config.model_repository.path = "/tmp/test_repo"
-        return LightServer(config)
+        server = LightServer(config)
+        http_state = HTTPState(
+            registry=server.registry,
+            transport=server.transport,
+            config=server.config,
+            response_queue_id=0,
+            repo_path=Path(server.config.model_repository.path),
+            log_queue=server._log_queue,
+            metrics_dir=server._metrics_dir,
+            model_manager=server.model_manager,
+        )
+        http_state.init_worker_locals()
+        return http_state
 
     def _run(self, coro):
         loop = asyncio.new_event_loop()
@@ -130,8 +145,9 @@ class TestModelHooks:
         finally:
             loop.close()
 
-    def test_on_request_injects_meta(self, server):
+    def test_on_request_injects_meta(self, state):
         from light_server.http.handlers import _do_infer
+        from light_server.core.model_manager import submit_infer
         from litserve.utils import ResponseBufferItem, LitAPIStatus
 
         async def mock_json():
@@ -146,26 +162,27 @@ class TestModelHooks:
         req.url = "http://localhost/v2/models/my_model/infer"
 
         # Setup model registry
-        server.registry.register("my_model", "1", {})
-        server.registry.set_status("my_model", "1", "READY")
-        server.registry.activate_version("my_model", "1")
+        state.registry.register("my_model", "1", {})
+        state.registry.set_status("my_model", "1", "READY")
+        state.registry.activate_version("my_model", "1")
 
         # Setup litapi with on_request hook (no on_response)
         lit_api = MagicMock(spec=["on_request"])
         lit_api.on_request = MagicMock(return_value={"input": 42, "_injected": True})
-        server.model_manager._litapi_instances["my_model_1"] = lit_api
 
-        # Mock infer to avoid worker queue
-        server.model_manager.infer = MagicMock(return_value="uid-1")
+        # Mock submit_infer to avoid worker queue
+        uid = "uid-1"
 
         event = asyncio.Event()
         event.set()
         item = ResponseBufferItem(event=event)
         item.response = ({"output": 99}, LitAPIStatus.OK)
 
-        with patch("asyncio.Event", return_value=event):
-            with patch("light_server.http.handlers.ResponseBufferItem", return_value=item):
-                result = self._run(_do_infer(server, "my_model", None, req))
+        with patch("light_server.http.handlers.asyncio.Event", return_value=event):
+            with patch("light_server.http.handlers.submit_infer", return_value=uid):
+                with patch("light_server.http.handlers.ResponseBufferItem", return_value=item):
+                    with patch.object(state, "get_litapi_hooks", return_value=lit_api):
+                        result = self._run(_do_infer(state, "my_model", None, req))
         assert result.status_code == 200
 
         # Verify on_request was called with correct meta
@@ -177,21 +194,19 @@ class TestModelHooks:
         assert meta["client_host"] == "1.2.3.4"
         assert meta["method"] == "POST"
 
-    def test_on_response_enhances_output(self, server):
+    def test_on_response_enhances_output(self, state):
         from light_server.http.handlers import _do_litapi_infer
         from litserve.utils import ResponseBufferItem, LitAPIStatus
 
         # Setup model registry
-        server.registry.register("my_model", "1", {})
-        server.registry.set_status("my_model", "1", "READY")
+        state.registry.register("my_model", "1", {})
+        state.registry.set_status("my_model", "1", "READY")
 
         # Setup litapi with on_response hook
         lit_api = MagicMock()
         lit_api.on_response = MagicMock(return_value={"output": 99, "extra": "data"})
-        server.model_manager._litapi_instances["my_model_1"] = lit_api
 
-        # Mock infer
-        server.model_manager.infer = MagicMock(return_value="uid-2")
+        uid = "uid-2"
 
         event = asyncio.Event()
         event.set()
@@ -199,9 +214,11 @@ class TestModelHooks:
         item.response = ({"output": 99}, LitAPIStatus.OK)
 
         request_meta = {"client_host": "1.2.3.4"}
-        with patch("asyncio.Event", return_value=event):
-            with patch("light_server.http.handlers.ResponseBufferItem", return_value=item):
-                result = self._run(_do_litapi_infer(server, "my_model", "1", {"input": 42}, request_meta))
+        with patch("light_server.http.handlers.asyncio.Event", return_value=event):
+            with patch("light_server.http.handlers.submit_infer", return_value=uid):
+                with patch("light_server.http.handlers.ResponseBufferItem", return_value=item):
+                    with patch.object(state, "get_litapi_hooks", return_value=lit_api):
+                        result = self._run(_do_litapi_infer(state, "my_model", "1", {"input": 42}, request_meta))
         assert result.status_code == 200
 
         # Verify on_response was called
@@ -212,18 +229,17 @@ class TestModelHooks:
         assert meta["status"] == "ok"
         assert meta["request_meta"]["client_host"] == "1.2.3.4"
 
-    def test_on_response_error_ignored(self, server):
+    def test_on_response_error_ignored(self, state):
         from light_server.http.handlers import _do_litapi_infer
         from litserve.utils import ResponseBufferItem, LitAPIStatus
 
-        server.registry.register("my_model", "1", {})
-        server.registry.set_status("my_model", "1", "READY")
+        state.registry.register("my_model", "1", {})
+        state.registry.set_status("my_model", "1", "READY")
 
         lit_api = MagicMock()
         lit_api.on_response = MagicMock(side_effect=RuntimeError("boom"))
-        server.model_manager._litapi_instances["my_model_1"] = lit_api
 
-        server.model_manager.infer = MagicMock(return_value="uid-3")
+        uid = "uid-3"
 
         event = asyncio.Event()
         event.set()
@@ -232,21 +248,22 @@ class TestModelHooks:
 
         # Should not raise even though on_response fails
         with patch("light_server.http.handlers.asyncio.Event", return_value=event):
-            with patch("light_server.http.handlers.ResponseBufferItem", return_value=item):
-                result = self._run(_do_litapi_infer(server, "my_model", "1", {"input": 42}))
+            with patch("light_server.http.handlers.submit_infer", return_value=uid):
+                with patch("light_server.http.handlers.ResponseBufferItem", return_value=item):
+                    with patch.object(state, "get_litapi_hooks", return_value=lit_api):
+                        result = self._run(_do_litapi_infer(state, "my_model", "1", {"input": 42}))
         assert result.status_code == 200
 
-    def test_no_hooks_no_error(self, server):
+    def test_no_hooks_no_error(self, state):
         from light_server.http.handlers import _do_litapi_infer
         from litserve.utils import ResponseBufferItem, LitAPIStatus
 
-        server.registry.register("my_model", "1", {})
-        server.registry.set_status("my_model", "1", "READY")
+        state.registry.register("my_model", "1", {})
+        state.registry.set_status("my_model", "1", "READY")
 
         lit_api = MagicMock(spec=[])  # no hooks at all
-        server.model_manager._litapi_instances["my_model_1"] = lit_api
 
-        server.model_manager.infer = MagicMock(return_value="uid-4")
+        uid = "uid-4"
 
         event = asyncio.Event()
         event.set()
@@ -254,8 +271,10 @@ class TestModelHooks:
         item.response = ({"output": 99}, LitAPIStatus.OK)
 
         with patch("light_server.http.handlers.asyncio.Event", return_value=event):
-            with patch("light_server.http.handlers.ResponseBufferItem", return_value=item):
-                result = self._run(_do_litapi_infer(server, "my_model", "1", {"input": 42}))
+            with patch("light_server.http.handlers.submit_infer", return_value=uid):
+                with patch("light_server.http.handlers.ResponseBufferItem", return_value=item):
+                    with patch.object(state, "get_litapi_hooks", return_value=lit_api):
+                        result = self._run(_do_litapi_infer(state, "my_model", "1", {"input": 42}))
         assert result.status_code == 200
 
 
@@ -264,8 +283,7 @@ class TestModelHooks:
 # ------------------------------------------------------------------
 
 class TestModelReadyHealthCheck:
-    def test_ready_includes_model_status(self):
-        from light_server.http.admin import create_admin_routes
+    def _make_state(self):
         from light_server.core.server import LightServer
         from light_server.config import Config
         from fastapi import FastAPI
@@ -274,21 +292,39 @@ class TestModelReadyHealthCheck:
         config.grpc.enabled = False
         config.metrics.enabled = False
         server = LightServer(config)
+        state = HTTPState(
+            registry=server.registry,
+            transport=server.transport,
+            config=server.config,
+            response_queue_id=0,
+            repo_path=Path(server.config.model_repository.path),
+            log_queue=server._log_queue,
+            metrics_dir=server._metrics_dir,
+            model_manager=server.model_manager,
+        )
+        state.init_worker_locals()
+        return state
 
-        server.registry.register("my_model", "1", {})
-        server.registry.set_status("my_model", "1", "READY")
-        server.registry.activate_version("my_model", "1")
+    def test_ready_includes_model_status(self):
+        from light_server.http.admin import create_admin_routes
+        from fastapi import FastAPI
+
+        state = self._make_state()
+
+        state.registry.register("my_model", "1", {})
+        state.registry.set_status("my_model", "1", "READY")
+        state.registry.activate_version("my_model", "1")
 
         lit_api = MagicMock()
         lit_api.health_check = MagicMock(return_value={"status": "healthy", "gpu": 0.5})
-        server.model_manager._litapi_instances["my_model_1"] = lit_api
 
         app = FastAPI()
-        create_admin_routes(app, server)
+        create_admin_routes(app, state)
 
         from fastapi.testclient import TestClient
         client = TestClient(app)
-        resp = client.get("/v2/models/my_model/ready")
+        with patch.object(state, "get_litapi_hooks", return_value=lit_api):
+            resp = client.get("/v2/models/my_model/ready")
         assert resp.status_code == 200
         data = resp.json()
         assert data["ready"] is True
@@ -297,57 +333,47 @@ class TestModelReadyHealthCheck:
 
     def test_ready_without_health_check(self):
         from light_server.http.admin import create_admin_routes
-        from light_server.core.server import LightServer
-        from light_server.config import Config
         from fastapi import FastAPI
 
-        config = Config()
-        config.grpc.enabled = False
-        config.metrics.enabled = False
-        server = LightServer(config)
+        state = self._make_state()
 
-        server.registry.register("my_model", "1", {})
-        server.registry.set_status("my_model", "1", "READY")
+        state.registry.register("my_model", "1", {})
+        state.registry.set_status("my_model", "1", "READY")
 
         # No health_check on lit_api
-        lit_api = MagicMock()
-        server.model_manager._litapi_instances["my_model_1"] = lit_api
+        lit_api = MagicMock(spec=[])
 
         app = FastAPI()
-        create_admin_routes(app, server)
+        create_admin_routes(app, state)
 
         from fastapi.testclient import TestClient
         client = TestClient(app)
-        resp = client.get("/v2/models/my_model/ready")
+        with patch.object(state, "get_litapi_hooks", return_value=lit_api):
+            resp = client.get("/v2/models/my_model/ready")
         assert resp.status_code == 200
         data = resp.json()
         assert "model_status" not in data
 
     def test_ready_health_check_error_graceful(self):
         from light_server.http.admin import create_admin_routes
-        from light_server.core.server import LightServer
-        from light_server.config import Config
         from fastapi import FastAPI
 
-        config = Config()
-        config.grpc.enabled = False
-        config.metrics.enabled = False
-        server = LightServer(config)
+        state = self._make_state()
 
-        server.registry.register("my_model", "1", {})
-        server.registry.set_status("my_model", "1", "READY")
-        server.registry.activate_version("my_model", "1")
+        state.registry.register("my_model", "1", {})
+        state.registry.set_status("my_model", "1", "READY")
+        state.registry.activate_version("my_model", "1")
 
         lit_api = MagicMock()
         lit_api.health_check = MagicMock(side_effect=RuntimeError("gpu not ready"))
-        server.model_manager._litapi_instances["my_model_1"] = lit_api
 
         app = FastAPI()
-        create_admin_routes(app, server)
+        create_admin_routes(app, state)
 
         from fastapi.testclient import TestClient
         client = TestClient(app)
-        resp = client.get("/v2/models/my_model/ready")
+        with patch.object(state, "get_litapi_hooks", return_value=lit_api):
+            resp = client.get("/v2/models/my_model/ready")
         assert resp.status_code == 200
         data = resp.json()
         assert data["model_status"]["status"] == "error"
@@ -359,10 +385,30 @@ class TestModelReadyHealthCheck:
 # ------------------------------------------------------------------
 
 class TestDynamicEndpointRegistration:
-    def test_health_endpoint_overrides_default(self, tmp_path):
-        from light_server.http.app import create_app
+    def _make_state(self, repo_path: Path):
         from light_server.core.server import LightServer
         from light_server.config import Config
+
+        config = Config()
+        config.grpc.enabled = False
+        config.metrics.enabled = False
+        config.model_repository.path = str(repo_path)
+        server = LightServer(config)
+        state = HTTPState(
+            registry=server.registry,
+            transport=server.transport,
+            config=server.config,
+            response_queue_id=0,
+            repo_path=Path(server.config.model_repository.path),
+            log_queue=server._log_queue,
+            metrics_dir=server._metrics_dir,
+            model_manager=server.model_manager,
+        )
+        state.init_worker_locals()
+        return state
+
+    def test_health_endpoint_overrides_default(self, tmp_path):
+        from light_server.http.app import create_app
 
         # Write health_endpoint.py
         (tmp_path / "health_endpoint.py").write_text(
@@ -370,13 +416,8 @@ class TestDynamicEndpointRegistration:
             "    return {'custom': True}\n"
         )
 
-        config = Config()
-        config.grpc.enabled = False
-        config.metrics.enabled = False
-        config.model_repository.path = str(tmp_path)
-        server = LightServer(config)
-
-        app = create_app(server)
+        state = self._make_state(tmp_path)
+        app = create_app(state)
 
         from fastapi.testclient import TestClient
         client = TestClient(app)
@@ -386,21 +427,14 @@ class TestDynamicEndpointRegistration:
 
     def test_async_endpoint(self, tmp_path):
         from light_server.http.app import create_app
-        from light_server.core.server import LightServer
-        from light_server.config import Config
 
         (tmp_path / "status_endpoint.py").write_text(
             "async def handler(request, server):\n"
             "    return {'async': True}\n"
         )
 
-        config = Config()
-        config.grpc.enabled = False
-        config.metrics.enabled = False
-        config.model_repository.path = str(tmp_path)
-        server = LightServer(config)
-
-        app = create_app(server)
+        state = self._make_state(tmp_path)
+        app = create_app(state)
 
         from fastapi.testclient import TestClient
         client = TestClient(app)
@@ -410,8 +444,6 @@ class TestDynamicEndpointRegistration:
 
     def test_post_endpoint(self, tmp_path):
         from light_server.http.app import create_app
-        from light_server.core.server import LightServer
-        from light_server.config import Config
 
         (tmp_path / "webhook_endpoint.py").write_text(
             "methods = ['POST']\n"
@@ -419,13 +451,8 @@ class TestDynamicEndpointRegistration:
             "    return {'webhook': True}\n"
         )
 
-        config = Config()
-        config.grpc.enabled = False
-        config.metrics.enabled = False
-        config.model_repository.path = str(tmp_path)
-        server = LightServer(config)
-
-        app = create_app(server)
+        state = self._make_state(tmp_path)
+        app = create_app(state)
 
         from fastapi.testclient import TestClient
         client = TestClient(app)
@@ -435,16 +462,9 @@ class TestDynamicEndpointRegistration:
 
     def test_default_health_when_no_endpoint_file(self, tmp_path):
         from light_server.http.app import create_app
-        from light_server.core.server import LightServer
-        from light_server.config import Config
 
-        config = Config()
-        config.grpc.enabled = False
-        config.metrics.enabled = False
-        config.model_repository.path = str(tmp_path)
-        server = LightServer(config)
-
-        app = create_app(server)
+        state = self._make_state(tmp_path)
+        app = create_app(state)
 
         from fastapi.testclient import TestClient
         client = TestClient(app)

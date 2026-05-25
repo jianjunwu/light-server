@@ -13,7 +13,7 @@ from light_server.core.exceptions import EnsembleError, InferenceTimeoutError, M
 from litserve.utils import LitAPIStatus, ResponseBufferItem
 
 if TYPE_CHECKING:
-    from light_server.core.server import LightServer
+    from light_server.http.state import HTTPState
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ class EnsembleExecutor:
 
     async def execute(
         self,
-        server: LightServer,
+        state: HTTPState,
         ensemble_config: EnsembleConfig,
         request_payload: dict[str, Any],
         ensemble_name: str = "unknown",
@@ -167,7 +167,7 @@ class EnsembleExecutor:
         for layer in layers:
             # Execute independent steps in parallel
             coros = [
-                self._execute_step(server, step, context, ensemble_name)
+                self._execute_step(state, step, context, ensemble_name)
                 for step in layer
             ]
             results = await asyncio.gather(*coros, return_exceptions=True)
@@ -185,12 +185,14 @@ class EnsembleExecutor:
 
     async def _execute_step(
         self,
-        server: LightServer,
+        state: HTTPState,
         step: EnsembleStep,
         context: dict[str, Any],
         ensemble_name: str,
     ) -> dict[str, Any]:
         """Run a single step: build payload, infer, await response."""
+        from light_server.core.model_manager import submit_infer
+
         start = time.time()
         try:
             # Resolve input references
@@ -199,32 +201,38 @@ class EnsembleExecutor:
                 payload[key] = self._resolve_ref(ref, context)
 
             # Ensure sub-model is ready
-            if not server.registry.is_ready(step.model, step.version):
+            if not state.registry.is_ready(step.model, step.version):
                 # Try auto-load
-                loaded = server.model_manager.load(step.model, step.version)
+                loaded = await state.load_model(step.model, step.version)
                 if loaded:
                     # Brief wait for worker startup (best-effort)
                     await asyncio.sleep(1.5)
 
-            if not server.registry.is_ready(step.model, step.version):
+            if not state.registry.is_ready(step.model, step.version):
                 raise ModelNotReadyError(
                     f"Sub-model {step.model} v{step.version} is not ready"
                 )
 
             # Submit inference
-            uid = server.model_manager.infer(
-                step.model, payload, version=step.version, response_queue_id=0
+            uid = submit_infer(
+                state.registry,
+                state.shm_buffer,
+                state.system_metrics,
+                step.model,
+                payload,
+                version=step.version,
+                response_queue_id=state.response_queue_id,
             )
 
             # Wait for response via the same response_buffer mechanism
             event = asyncio.Event()
-            server.response_buffer[uid] = ResponseBufferItem(event=event)
+            state.response_buffer[uid] = ResponseBufferItem(event=event)
 
             try:
-                timeout = server.config.server.timeout
+                timeout = state.config.server.timeout
                 await asyncio.wait_for(event.wait(), timeout=timeout)
 
-                response_item = server.response_buffer.pop(uid)
+                response_item = state.response_buffer.pop(uid)
                 response_data, status = response_item.response
 
                 if status == LitAPIStatus.ERROR:
@@ -235,11 +243,11 @@ class EnsembleExecutor:
                 return response_data
 
             except asyncio.TimeoutError:
-                server.response_buffer.pop(uid, None)
+                state.response_buffer.pop(uid, None)
                 raise InferenceTimeoutError(f"Step '{step.name}' timed out")
         finally:
             latency = time.time() - start
-            metrics = getattr(server, "system_metrics", None)
+            metrics = state.system_metrics
             if metrics is not None:
                 metrics.record_ensemble_step_latency(
                     ensemble=ensemble_name, step=step.name, model=step.model, latency=latency

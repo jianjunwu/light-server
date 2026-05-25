@@ -15,26 +15,26 @@ from light_server.config import load_config
 def _serve_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("module", nargs="?", help="Python module:Class (e.g., my_model:MyAPI)")
     parser.add_argument("--config", "-c", help="Path to YAML configuration file")
-    parser.add_argument("--port", type=int, default=8000, help="HTTP server port")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind address")
-    parser.add_argument("--accelerator", default="auto", help="Hardware accelerator")
-    parser.add_argument("--devices", default="auto", help="Number of devices")
-    parser.add_argument("--workers-per-device", type=int, default=1, help="Workers per device")
-    parser.add_argument("--timeout", type=float, default=30.0, help="Request timeout")
-    parser.add_argument("--log-level", default="info", help="Logging level")
+    parser.add_argument("--port", type=int, default=None, help="HTTP server port")
+    parser.add_argument("--host", default=None, help="Bind address")
+    parser.add_argument("--accelerator", default=None, help="Hardware accelerator")
+    parser.add_argument("--devices", default=None, help="Number of devices")
+    parser.add_argument("--workers-per-device", type=int, default=None, help="Workers per device")
+    parser.add_argument("--timeout", type=float, default=None, help="Request timeout")
+    parser.add_argument("--log-level", default=None, help="Logging level")
     parser.add_argument("--log-dir", help="Log directory (creates info.log and error.log)")
     parser.add_argument("--log-info", help="Info log file path")
     parser.add_argument("--log-error", help="Error log file path")
-    parser.add_argument("--log-format", default="json", choices=["json", "text"], help="Log format")
-    parser.add_argument("--log-rotate-by", default="none", choices=["none", "size", "time"], help="Rotation strategy")
-    parser.add_argument("--log-max-size", type=int, default=100, help="Max log file size in MB (for size rotation)")
-    parser.add_argument("--log-when", default="midnight", help="Rotation interval (for time rotation: H/D/midnight)")
-    parser.add_argument("--log-backup-count", type=int, default=7, help="Number of backup log files to keep")
+    parser.add_argument("--log-format", default=None, choices=["json", "text"], help="Log format")
+    parser.add_argument("--log-rotate-by", default=None, choices=["none", "size", "time"], help="Rotation strategy")
+    parser.add_argument("--log-max-size", type=int, default=None, help="Max log file size in MB (for size rotation)")
+    parser.add_argument("--log-when", default=None, help="Rotation interval (for time rotation: H/D/midnight)")
+    parser.add_argument("--log-backup-count", type=int, default=None, help="Number of backup log files to keep")
     parser.add_argument("--model-repo", help="Model repository path (directory containing models or .lma files)")
-    parser.add_argument("--grpc-port", type=int, default=8001, help="gRPC port")
-    parser.add_argument("--metrics-port", type=int, default=8002, help="Metrics port")
-    parser.add_argument("--no-grpc", action="store_true", help="Disable gRPC")
-    parser.add_argument("--no-metrics", action="store_true", help="Disable metrics")
+    parser.add_argument("--grpc-port", type=int, default=None, help="gRPC port")
+    parser.add_argument("--metrics-port", type=int, default=None, help="Metrics port")
+    parser.add_argument("--no-grpc", action="store_true", default=None, help="Disable gRPC")
+    parser.add_argument("--no-metrics", action="store_true", default=None, help="Disable metrics")
 
 
 def _benchmark_args(parser: argparse.ArgumentParser) -> None:
@@ -160,25 +160,25 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
         config = Config(
             server=ServerConfig(
-                http_port=args.port,
-                host=args.host,
-                accelerator=args.accelerator,
-                devices=args.devices,
-                workers_per_device=args.workers_per_device,
-                timeout=args.timeout,
-                log_level=args.log_level,
+                http_port=args.port or 8000,
+                host=args.host or "0.0.0.0",
+                accelerator=args.accelerator or "auto",
+                devices=args.devices or "auto",
+                workers_per_device=args.workers_per_device or 1,
+                timeout=args.timeout or 30.0,
+                log_level=args.log_level or "info",
             ),
-            grpc=GrpcConfig(enabled=not args.no_grpc, max_workers=10),
-            metrics=MetricsConfig(enabled=not args.no_metrics),
+            grpc=GrpcConfig(enabled=not (args.no_grpc or False), max_workers=10),
+            metrics=MetricsConfig(enabled=not (args.no_metrics or False)),
             logging=LoggingConfig(
-                level=args.log_level,
-                format=args.log_format,
+                level=args.log_level or "info",
+                format=args.log_format or "json",
                 info_output=log_info,
                 error_output=log_error,
-                rotate_by=args.log_rotate_by,
-                max_size=args.log_max_size,
-                when=args.log_when,
-                backup_count=args.log_backup_count,
+                rotate_by=args.log_rotate_by or "none",
+                max_size=args.log_max_size or 100,
+                when=args.log_when or "midnight",
+                backup_count=args.log_backup_count or 7,
             ),
             model_repository=ModelRepositoryConfig(
                 path=model_repo_path,
@@ -189,6 +189,53 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         if args.module:
             # Single module mode: parse module:Class
             config.load_models = ["__cli__"]
+
+    # CLI overrides take precedence over config file values
+    if args.port is not None:
+        config.server.http_port = args.port
+    if args.host is not None:
+        config.server.host = args.host
+    if args.accelerator is not None:
+        config.server.accelerator = args.accelerator
+    if args.devices is not None:
+        config.server.devices = args.devices
+    if args.workers_per_device is not None:
+        config.server.workers_per_device = args.workers_per_device
+    if args.timeout is not None:
+        config.server.timeout = args.timeout
+    if args.log_level is not None:
+        config.server.log_level = args.log_level
+        config.logging.level = args.log_level
+    if args.grpc_port is not None:
+        config.server.grpc_port = args.grpc_port
+    if args.metrics_port is not None:
+        config.server.metrics_port = args.metrics_port
+    if args.no_grpc:
+        config.grpc.enabled = False
+    if args.no_metrics:
+        config.metrics.enabled = False
+    if args.model_repo is not None:
+        config.model_repository.path = args.model_repo
+    if args.log_format is not None:
+        config.logging.format = args.log_format
+    if args.log_info is not None:
+        config.logging.info_output = args.log_info
+    if args.log_error is not None:
+        config.logging.error_output = args.log_error
+    if args.log_dir is not None:
+        if not (args.log_info or args.log_error):
+            log_dir = Path(args.log_dir)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            config.logging.info_output = str(log_dir / "info.log")
+            config.logging.error_output = str(log_dir / "error.log")
+    if args.log_rotate_by is not None:
+        config.logging.rotate_by = args.log_rotate_by
+    if args.log_max_size is not None:
+        config.logging.max_size = args.log_max_size
+    if args.log_when is not None:
+        config.logging.when = args.log_when
+    if args.log_backup_count is not None:
+        config.logging.backup_count = args.log_backup_count
 
     server = LightServer(config)
     try:

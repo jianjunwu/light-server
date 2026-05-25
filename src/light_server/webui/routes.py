@@ -39,23 +39,23 @@ def _get_templates() -> Jinja2Templates:
     return Jinja2Templates(directory=str(tpl_dir))
 
 
-def create_ui_routes(app: FastAPI, server: Any) -> None:
+def create_ui_routes(app: FastAPI, state: Any) -> None:
     """Register Web UI routes and static files on the FastAPI app."""
     static_dir = Path(__file__).parent / "static"
     app.mount("/ui/static", StaticFiles(directory=str(static_dir)), name="ui_static")
 
     tpl = _get_templates()
     report_store = BenchmarkReportStore(
-        retention_days=server.config.webui.report_retention_days
+        retention_days=state.config.webui.report_retention_days
     )
-    metrics_agg = MetricsAggregator(server.system_metrics)
+    metrics_agg = MetricsAggregator(state.system_metrics)
 
     # ------------------------------------------------------------------
     # Helper: build dashboard model list
     # ------------------------------------------------------------------
     def _build_dashboard_models() -> list[dict[str, Any]]:
-        loaded = {e["name"]: e for e in server.registry.list_loaded()}
-        available = server.model_manager.list_repository()
+        loaded = {e["name"]: e for e in state.registry.list_loaded()}
+        available = state.list_repository()
         models: list[dict[str, Any]] = []
         seen = set()
         for m in available:
@@ -67,14 +67,14 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
             status = entry.get("status", "NOT_LOADED")
             version = entry.get("version", m.get("version", "1"))
             model_type = entry.get("model_type", "litapi")
-            active = server.registry.get_active_version(name)
+            active = state.registry.get_active_version(name)
             config = entry.get("config", {})
             stream = config.get("stream", False)
             bidirectional = config.get("bidirectional", False)
             workers = 0
             if status == "READY":
                 try:
-                    workers = int(server.system_metrics.active_workers.labels(model=name, version=version)._value.get())
+                    workers = int(state.system_metrics.active_workers.labels(model=name, version=version)._value.get())
                 except Exception:
                     pass
             # Get metrics for active version
@@ -122,10 +122,10 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
     @app.get("/ui/models/{model_name}", response_class=HTMLResponse)
     async def page_model_detail(request: Request, model_name: str) -> HTMLResponse:
         is_htmx = request.headers.get("HX-Request") == "true"
-        versions = server.registry.list_versions(model_name)
-        active = server.registry.get_active_version(model_name)
+        versions = state.registry.list_versions(model_name)
+        active = state.registry.get_active_version(model_name)
         # Also include available versions from repo
-        available = server.model_manager.list_repository()
+        available = state.list_repository()
         seen_versions = {v["version"] for v in versions}
         for a in available:
             if a["name"] == model_name and a["version"] not in seen_versions:
@@ -157,7 +157,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
     @app.get("/ui/repository", response_class=HTMLResponse)
     async def page_repository(request: Request) -> HTMLResponse:
         is_htmx = request.headers.get("HX-Request") == "true"
-        repo_models = server.model_manager.list_repository()
+        repo_models = state.list_repository()
         if is_htmx:
             return tpl.TemplateResponse(request, "repository.html", {
             "repo_models": repo_models
@@ -180,7 +180,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
 
     @app.get("/ui/benchmarks/new", response_class=HTMLResponse)
     async def page_benchmark_new(request: Request) -> HTMLResponse:
-        models = server.registry.list_loaded()
+        models = state.registry.list_loaded()
         return tpl.TemplateResponse(request, "benchmark_form.html", {
             "active_page": "benchmarks",
             "models": models
@@ -203,7 +203,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
     async def page_config(request: Request, saved: bool = False, error: str = "") -> HTMLResponse:
         return tpl.TemplateResponse(request, "config_edit.html", {
             "active_page": "config",
-            "cfg": server.config,
+            "cfg": state.config,
             "saved": saved,
             "error": error
         })
@@ -258,7 +258,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
                     content="<span style='color:#991b1b;'>Invalid filename</span>",
                     status_code=400,
                 )
-            dest = Path(server.config.model_repository.path) / safe_name
+            dest = Path(state.config.model_repository.path) / safe_name
             shutil.copy2(tmp_path, dest)
             return HTMLResponse(
                 content=f"<span style='color:#166534;'>Uploaded {manifest.name} v{manifest.version}</span>"
@@ -277,7 +277,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
         model_name: str,
         version: str = Query("1"),
     ) -> HTMLResponse:
-        success = server.model_manager.load(model_name, version=version)
+        success = await state.load_model(model_name, version=version)
         if not success:
             return HTMLResponse(content=f"<span style='color:#991b1b;'>Failed to load {model_name}</span>", status_code=400)
         models = _build_dashboard_models()
@@ -291,7 +291,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
         model_name: str,
         version: str | None = Query(None),
     ) -> HTMLResponse:
-        server.model_manager.unload(model_name, version=version)
+        await state.unload_model(model_name, version=version)
         models = _build_dashboard_models()
         return tpl.TemplateResponse(request, "dashboard_cards.html", {
             "models": models
@@ -303,7 +303,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
         model_name: str,
         version: str,
     ) -> HTMLResponse:
-        success = server.model_manager.activate(model_name, version)
+        success = await state.activate_model(model_name, version)
         if not success:
             return HTMLResponse(content=f"<span style='color:#991b1b;'>Failed to activate {model_name} v{version}</span>", status_code=400)
         return RedirectResponse(url=f"/ui/models/{model_name}", status_code=302)
@@ -342,7 +342,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
                 duration=duration,
                 payload=payload,
                 protocol=protocol,
-                server=server,
+                server=state,
                 store=report_store,
             )
         )
@@ -414,7 +414,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
     # ------------------------------------------------------------------
     @app.get("/ui/api/config")
     async def api_get_config() -> JSONResponse:
-        return JSONResponse(_config_to_dict(server.config))
+        return JSONResponse(_config_to_dict(state.config))
 
     @app.post("/ui/api/config")
     async def api_save_config(
@@ -482,7 +482,7 @@ def create_ui_routes(app: FastAPI, server: Any) -> None:
                 load_models=load_models,
             )
             # Write back to the original config file if known
-            config_path = getattr(server, "_config_path", None)
+            config_path = getattr(state, "_config_path", None)
             if config_path is None:
                 config_path = Path("server.yaml")
             with open(config_path, "w", encoding="utf-8") as f:
@@ -505,14 +505,14 @@ async def _run_benchmark_job(
     duration: float,
     payload: str,
     protocol: str,
-    server: Any,
+    state: Any,
     store: BenchmarkReportStore,
 ) -> None:
     global _benchmark_running
     target = None
     try:
         _job_store[job_id] = {"status": "running", "progress": 5}
-        port = server.config.server.http_port
+        port = state.config.server.http_port
         parsed_payload = json.loads(payload) if payload else {"input": 1.0}
 
         if protocol == "websocket":

@@ -41,6 +41,7 @@ class HTTPState:
         metrics_dir: str | None = None,
         model_manager: Any | None = None,
         response_buffer: Any | None = None,
+        config_path: str | None = None,
     ) -> None:
         self.registry = registry
         self.transport = transport
@@ -52,6 +53,7 @@ class HTTPState:
         self.admin_response_queue = admin_response_queue
         self.metrics_dir = metrics_dir
         self._model_manager = model_manager
+        self._config_path = config_path
 
         # Per-process locals (not pickled)
         self._system_metrics: Any | None = None

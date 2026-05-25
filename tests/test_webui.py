@@ -125,8 +125,10 @@ def test_metrics_aggregator_with_requests():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def mock_server(tmp_path: Path):
-    """Create a minimal mock server for route testing."""
+def mock_state(tmp_path: Path):
+    """Create a minimal HTTPState for route testing."""
+    from light_server.http.state import HTTPState
+
     config = Config(
         server=ServerConfig(http_port=18000),
         webui=WebUIConfig(enabled=True, report_retention_days=7),
@@ -137,59 +139,69 @@ def mock_server(tmp_path: Path):
     registry.get_active_version.return_value = None
     registry.is_ready.return_value = False
 
-    model_manager = MagicMock()
-    model_manager.list_repository.return_value = []
-    model_manager.get_model_config.return_value = {}
+    transport = MagicMock()
 
-    system_metrics = MagicMock()
+    state = HTTPState(
+        registry=registry,
+        transport=transport,
+        config=config,
+        response_queue_id=0,
+        repo_path=tmp_path,
+    )
+    state._system_metrics = MagicMock()
+    state.list_repository = MagicMock(return_value=[])
 
-    server = MagicMock()
-    server.config = config
-    server.registry = registry
-    server.model_manager = model_manager
-    server.system_metrics = system_metrics
-    return server
+    async def _return_true(*args, **kwargs):
+        return True
+
+    async def _return_none(*args, **kwargs):
+        return None
+
+    state.load_model = _return_true
+    state.unload_model = _return_none
+    state.activate_model = _return_true
+    return state
 
 
-def test_ui_dashboard_page(mock_server):
+def test_ui_dashboard_page(mock_state):
     app = FastAPI()
-    create_ui_routes(app, mock_server)
+    create_ui_routes(app, mock_state)
     client = TestClient(app)
     resp = client.get("/ui/")
     assert resp.status_code == 200
     assert "Dashboard" in resp.text
 
 
-def test_ui_repository_page(mock_server):
+def test_ui_repository_page(mock_state):
     app = FastAPI()
-    create_ui_routes(app, mock_server)
+    create_ui_routes(app, mock_state)
     client = TestClient(app)
     resp = client.get("/ui/repository")
     assert resp.status_code == 200
     assert "Repository" in resp.text
 
 
-def test_ui_benchmarks_page(mock_server):
+def test_ui_benchmarks_page(mock_state):
     app = FastAPI()
-    create_ui_routes(app, mock_server)
+    create_ui_routes(app, mock_state)
     client = TestClient(app)
     resp = client.get("/ui/benchmarks")
     assert resp.status_code == 200
     assert "Benchmarks" in resp.text
 
 
-def test_ui_config_page(mock_server):
+def test_ui_config_page(mock_state):
     app = FastAPI()
-    create_ui_routes(app, mock_server)
+    create_ui_routes(app, mock_state)
     client = TestClient(app)
     resp = client.get("/ui/config")
     assert resp.status_code == 200
     assert "Configuration" in resp.text
 
 
-def test_ui_api_config_get(mock_server):
+def test_ui_api_config_get(mock_state):
     app = FastAPI()
-    create_ui_routes(app, mock_server)
+    create_ui_routes(app, mock_state)
     client = TestClient(app)
     resp = client.get("/ui/api/config")
     assert resp.status_code == 200
@@ -198,9 +210,9 @@ def test_ui_api_config_get(mock_server):
     assert "webui" in data
 
 
-def test_ui_api_reports_empty(mock_server):
+def test_ui_api_reports_empty(mock_state):
     app = FastAPI()
-    create_ui_routes(app, mock_server)
+    create_ui_routes(app, mock_state)
     client = TestClient(app)
     resp = client.get("/ui/api/reports")
     assert resp.status_code == 200
@@ -208,9 +220,9 @@ def test_ui_api_reports_empty(mock_server):
     assert data["reports"] == []
 
 
-def test_ui_static_files(mock_server):
+def test_ui_static_files(mock_state):
     app = FastAPI()
-    create_ui_routes(app, mock_server)
+    create_ui_routes(app, mock_state)
     client = TestClient(app)
     resp = client.get("/ui/static/vendor/htmx.min.js")
     assert resp.status_code == 200
@@ -221,24 +233,26 @@ def test_ui_static_files(mock_server):
     assert "Pico" in resp.text
 
 
-def test_ui_api_metrics_summary(mock_server):
-    mock_server.model_manager.list_repository.return_value = [
+def test_ui_api_metrics_summary(mock_state):
+    mock_state.list_repository.return_value = [
         {"name": "test_model", "version": "1", "type": "litapi"},
     ]
     app = FastAPI()
-    create_ui_routes(app, mock_server)
+    create_ui_routes(app, mock_state)
     client = TestClient(app)
     resp = client.get("/ui/api/metrics/summary")
     assert resp.status_code == 200
     assert "test_model" in resp.text
 
 
-def test_ui_api_model_load_unload(mock_server):
-    mock_server.model_manager.load.return_value = True
-    mock_server.model_manager.unload.return_value = True
+def test_ui_api_model_load_unload(mock_state):
+    from unittest.mock import AsyncMock
+
+    mock_state.load_model = AsyncMock(return_value=True)
+    mock_state.unload_model = AsyncMock(return_value=True)
 
     app = FastAPI()
-    create_ui_routes(app, mock_server)
+    create_ui_routes(app, mock_state)
     client = TestClient(app)
 
     resp = client.post("/ui/api/models/test_model/load")
@@ -248,9 +262,9 @@ def test_ui_api_model_load_unload(mock_server):
     assert resp.status_code == 200
 
 
-def test_ui_artifact_upload_invalid_extension(mock_server):
+def test_ui_artifact_upload_invalid_extension(mock_state):
     app = FastAPI()
-    create_ui_routes(app, mock_server)
+    create_ui_routes(app, mock_state)
     client = TestClient(app)
     resp = client.post(
         "/ui/api/artifacts/upload",
@@ -260,13 +274,13 @@ def test_ui_artifact_upload_invalid_extension(mock_server):
     assert "Invalid file" in resp.text
 
 
-def test_ui_config_save(mock_server, tmp_path: Path):
+def test_ui_config_save(mock_state, tmp_path: Path):
     config_path = tmp_path / "test_config.yaml"
     config_path.write_text("server:\n  http_port: 8000\n")
-    mock_server._config_path = str(config_path)
+    mock_state._config_path = str(config_path)
 
     app = FastAPI()
-    create_ui_routes(app, mock_server)
+    create_ui_routes(app, mock_state)
     client = TestClient(app)
 
     resp = client.post(

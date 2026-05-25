@@ -112,6 +112,7 @@ class LightServer:
             metrics_dir=self._metrics_dir,
             model_manager=self.model_manager,
             response_buffer=self.response_buffer,
+            config_path=getattr(self, "_config_path", None),
         )
         state.init_worker_locals()
         return create_app(state, shutdown_callback=self.shutdown)

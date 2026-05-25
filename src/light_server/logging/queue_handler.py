@@ -3,22 +3,16 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import multiprocessing as mp
-from typing import Any
 
 
-class MPQueueHandler(logging.Handler):
-    """Sends log records to a multiprocessing queue for centralized processing."""
+class MPQueueHandler(logging.handlers.QueueHandler):
+    """Sends log records to a multiprocessing queue for centralized processing.
 
-    def __init__(self, queue: mp.Queue) -> None:
-        super().__init__()
-        self.queue = queue
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            self.queue.put(record)
-        except Exception:
-            self.handleError(record)
+    Inherits from stdlib QueueHandler which automatically sanitizes
+    exc_info/args/msg before putting the record across process boundaries.
+    """
 
 
 def setup_worker_logging(queue: mp.Queue, level: str = "INFO") -> None:
@@ -27,8 +21,6 @@ def setup_worker_logging(queue: mp.Queue, level: str = "INFO") -> None:
     root.handlers = []
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
     handler = MPQueueHandler(queue)
-    formatter = logging.Formatter(
-        "%(asctime)s - %(processName)s[%(process)d] - %(name)s - %(levelname)s - %(message)s"
-    )
-    handler.setFormatter(formatter)
+    # NOTE: Do NOT set formatter here. QueueHandler.prepare() flattens
+    # the message; the consumer (LogConsumer in main process) owns formatting.
     root.addHandler(handler)

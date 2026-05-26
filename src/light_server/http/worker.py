@@ -34,16 +34,27 @@ def http_worker_main(
             that signals the worker to exit gracefully.
     """
     # Set up logging in the worker process
+    log_fmt = getattr(state.config.logging, "format", "json")
     if state.log_queue is not None:
         from light_server.logging.queue_handler import setup_worker_logging
 
-        setup_worker_logging(state.log_queue, level=state.config.logging.level)
+        setup_worker_logging(state.log_queue, level=state.config.logging.level, fmt=log_fmt)
     else:
         root = logging.getLogger()
+        root.handlers = []
         root.setLevel(getattr(logging, state.config.server.log_level.upper(), logging.INFO))
-        if not root.handlers:
-            handler = logging.StreamHandler(sys.stdout)
-            root.addHandler(handler)
+        handler = logging.StreamHandler(sys.stdout)
+        if log_fmt == "json":
+            from light_server.logging.consumer import _JSONFormatter
+
+            handler.setFormatter(_JSONFormatter())
+        else:
+            handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s - %(processName)s[%(process)d] - %(name)s - %(levelname)s - %(message)s"
+                )
+            )
+        root.addHandler(handler)
 
     # Initialise per-process resources (metrics, SHM buffer, hook cache)
     state.init_worker_locals()

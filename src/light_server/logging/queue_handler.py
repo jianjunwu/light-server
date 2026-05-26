@@ -15,11 +15,19 @@ class MPQueueHandler(logging.handlers.QueueHandler):
     """
 
 
-def setup_worker_logging(queue: mp.Queue, level: str = "INFO") -> None:
+def setup_worker_logging(queue: mp.Queue, level: str = "INFO", fmt: str = "json") -> None:
     """Configure logging in worker processes to use the queue handler."""
     root = logging.getLogger()
     root.handlers = []
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
+
+    # Clear any pre-existing handlers on non-root loggers (e.g. uvicorn)
+    # so that all logs propagate to the root queue handler.
+    for logger_name in list(logging.root.manager.loggerDict.keys()):
+        logger = logging.getLogger(logger_name)
+        logger.handlers = []
+        logger.propagate = True
+
     handler = MPQueueHandler(queue)
     # NOTE: Do NOT set formatter here. QueueHandler.prepare() flattens
     # the message; the consumer (LogConsumer in main process) owns formatting.

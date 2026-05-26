@@ -53,12 +53,22 @@ class LogConsumer:
         self.backup_count = backup_count
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._handlers: list[tuple[str, logging.Handler]] = []
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True, name="log-consumer")
         self._thread.start()
 
     def stop(self) -> None:
+        # Drain remaining records before signalling stop
+        while True:
+            try:
+                record = self.queue.get(timeout=0.1)
+            except Exception:
+                break
+            for _name, handler in self._handlers:
+                if record.levelno >= handler.level:
+                    handler.emit(record)
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=2)
@@ -93,13 +103,13 @@ class LogConsumer:
         return handler
 
     def _run(self) -> None:
-        handlers: list[tuple[str, logging.Handler]] = []
+        self._handlers = []
         if self.info_output:
-            handlers.append(("info", self._build_handler(self.info_output, logging.INFO)))
+            self._handlers.append(("info", self._build_handler(self.info_output, logging.INFO)))
         if self.error_output:
-            handlers.append(("error", self._build_handler(self.error_output, logging.ERROR)))
+            self._handlers.append(("error", self._build_handler(self.error_output, logging.ERROR)))
 
-        if not handlers:
+        if not self._handlers:
             # No file outputs configured — log to console
             handler = logging.StreamHandler()
             handler.setLevel(self.level)
@@ -111,7 +121,7 @@ class LogConsumer:
                         "%(asctime)s - %(processName)s[%(process)d] - %(name)s - %(levelname)s - %(message)s"
                     )
                 )
-            handlers.append(("console", handler))
+            self._handlers.append(("console", handler))
 
         while not self._stop_event.is_set():
             try:
@@ -119,12 +129,12 @@ class LogConsumer:
             except Exception:
                 continue
 
-            for _name, handler in handlers:
+            for _name, handler in self._handlers:
                 if record.levelno >= handler.level:
                     handler.emit(record)
 
         # Flush and close all handlers on shutdown
-        for _name, handler in handlers:
+        for _name, handler in self._handlers:
             try:
                 handler.flush()
                 handler.close()

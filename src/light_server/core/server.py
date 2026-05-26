@@ -526,14 +526,6 @@ class LightServer:
                 q.join_thread()
             except Exception:
                 pass
-        if self._log_consumer:
-            self._log_consumer.stop()
-        if self._log_queue is not None:
-            try:
-                self._log_queue.close()
-                self._log_queue.join_thread()
-            except Exception:
-                pass
         # Clean up prometheus multiprocess temp directory
         if self._metrics_dir and os.path.isdir(self._metrics_dir):
             import shutil
@@ -551,6 +543,20 @@ class LightServer:
             except OSError as e:
                 logger.warning(f"Failed to clean up metrics dir {self._metrics_dir}: {e}")
         logger.info("Shutdown complete")
+        # Flush root handlers so the final log reaches the consumer before we stop it
+        for handler in logging.getLogger().handlers:
+            try:
+                handler.flush()
+            except Exception:
+                pass
+        if self._log_consumer:
+            self._log_consumer.stop()
+        if self._log_queue is not None:
+            try:
+                self._log_queue.close()
+                self._log_queue.join_thread()
+            except Exception:
+                pass
 
 
 def _http_worker_entry(state: HTTPState, sock: socket.socket) -> None:

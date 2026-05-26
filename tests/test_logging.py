@@ -111,3 +111,47 @@ def test_setup_worker_logging():
     record = queue.get(timeout=1)
     assert record.getMessage() == "from_worker"
     assert record.name == "worker_test"
+
+
+def test_setup_worker_logging_clears_existing_handlers():
+    """Existing logger handlers (e.g. uvicorn) should be cleared so logs propagate to root queue handler."""
+    queue = mp.Queue()
+    # Simulate uvicorn or another library adding its own handler
+    uvicorn_logger = logging.getLogger("uvicorn.error")
+    uvicorn_logger.handlers = [logging.StreamHandler()]
+    uvicorn_logger.propagate = False
+
+    setup_worker_logging(queue, level="INFO")
+
+    # Handler removed and propagate restored
+    assert uvicorn_logger.handlers == []
+    assert uvicorn_logger.propagate is True
+
+    # Log should now reach the queue via root
+    uvicorn_logger.info("uvicorn_msg")
+    record = queue.get(timeout=1)
+    assert record.getMessage() == "uvicorn_msg"
+
+
+def test_setup_worker_logging_fallback_without_queue_uses_configured_format():
+    """When log_queue is None, worker should still use the configured format (json or text)."""
+    import io
+
+    # Test JSON format fallback
+    stream = io.StringIO()
+    root = logging.getLogger()
+    old_handlers = root.handlers[:]
+    root.handlers = []
+    handler = logging.StreamHandler(stream)
+    from light_server.logging.consumer import _JSONFormatter
+    handler.setFormatter(_JSONFormatter())
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+    logging.getLogger("test").info("hello_json")
+    output = stream.getvalue()
+    root.handlers = old_handlers
+
+    # Output should be valid JSON
+    parsed = json.loads(output.strip())
+    assert parsed["message"] == "hello_json"

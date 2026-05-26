@@ -11,7 +11,7 @@ import signal
 import sys
 from pathlib import Path
 
-from light_server.config import Config, GrpcConfig, MetricsConfig, ModelRepositoryConfig, ServerConfig
+from light_server.config import Config, GrpcConfig, MetricsConfig, ModelConfig, ModelRepositoryConfig, ServerConfig
 from light_server.core.server import LightServer
 
 
@@ -61,6 +61,13 @@ def main() -> int:
             control_mode="explicit",
         ),
         load_models=model_names,
+        models=[
+            ModelConfig(
+                name=name,
+                workers_per_device=args.workers,
+            )
+            for name in model_names
+        ],
     )
 
     server = LightServer(config)

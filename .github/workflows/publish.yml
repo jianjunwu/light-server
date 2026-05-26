@@ -10,22 +10,18 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: '3.11'
-
-      - name: Install build tools
-        run: pip install build
+          enable-cache: true
 
       - name: Build wheel and sdist
-        run: python -m build
+        run: uv build
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
@@ -37,11 +33,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@v4
 
       - name: Download build artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
@@ -50,6 +45,51 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --generate-notes \
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          EXTRA="${VERSION#*-}"
+          BASE_VERSION="${VERSION%%-*}"
+
+          if [ "$EXTRA" = "$VERSION" ]; then
+            EXTRA=""
+          fi
+
+          INSTALL_CMD="pip install light-server"
+          if [ -n "$EXTRA" ]; then
+            INSTALL_CMD="pip install light-server[${EXTRA}]"
+          fi
+
+          NOTES="## Install
+
+\`\`\`bash
+${INSTALL_CMD}==${BASE_VERSION}
+\`\`\`
+
+### All extras
+
+| Extra | Command |
+|-------|---------|
+| (none) | \`pip install light-server==${BASE_VERSION}\` |
+| http | \`pip install light-server[http]==${BASE_VERSION}\` |
+| grpc | \`pip install light-server[grpc]==${BASE_VERSION}\` |
+| all | \`pip install light-server[all]==${BASE_VERSION}\` |"
+
+          gh release create "${TAG}" \
+            --notes "${NOTES}" \
             dist/*
+
+  pypi:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

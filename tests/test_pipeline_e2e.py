@@ -36,7 +36,7 @@ model_repository:
   path: {repo_path}
   control_mode: explicit
 load_models:
-{''.join(f'  - {m}\n' for m in load_models)}
+{"".join("  - " + m + "\n" for m in load_models)}
 """
 
 

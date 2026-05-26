@@ -74,6 +74,19 @@ pip install light-server
 
 支持平台：Linux AMD64、Linux ARM64（已通过 CI 验证）。macOS 可运行但未经 CI 覆盖。
 
+### 可选依赖
+
+```bash
+# 仅安装 gRPC 支持
+pip install light-server[grpc]
+
+# 仅安装 HTTP 扩展（含 ZMQ transport）
+pip install light-server[http]
+
+# 安装所有可选依赖
+pip install light-server[all]
+```
+
 ### 从源码开发
 
 本项目使用 [uv](https://docs.astral.sh/uv/) 管理依赖：
@@ -87,6 +100,29 @@ uv run pytest tests/ -v
 
 # 启动服务（开发模式）
 uv run light-server serve --config server.yaml
+```
+
+### 构建 Wheel
+
+```bash
+# 构建 sdist + wheel，输出到 dist/
+uv build
+
+# 仅构建 wheel
+uv build --wheel
+```
+
+构建产物位于 `dist/light_server-*.whl`，安装时按需指定可选依赖：
+
+```bash
+# 基础安装（HTTP 核心已内置）
+pip install dist/light_server-*.whl
+
+# 带 gRPC 支持
+pip install "dist/light_server-*.whl[grpc]"
+
+# 带全部可选依赖
+pip install "dist/light_server-*.whl[all]"
 ```
 
 ## 快速开始

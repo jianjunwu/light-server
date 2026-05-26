@@ -72,6 +72,19 @@ pip install light-server
 
 Requires Python >= 3.10.
 
+### Optional Dependencies
+
+```bash
+# gRPC support only
+pip install light-server[grpc]
+
+# HTTP extensions (includes ZMQ transport)
+pip install light-server[http]
+
+# All optional dependencies
+pip install light-server[all]
+```
+
 ### Development from Source
 
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management:
@@ -85,6 +98,29 @@ uv run pytest tests/ -v
 
 # Start the server (development mode)
 uv run light-server serve --config server.yaml
+```
+
+### Build Wheel
+
+```bash
+# Build sdist + wheel, output to dist/
+uv build
+
+# Wheel only
+uv build --wheel
+```
+
+The build artifact is at `dist/light_server-*.whl`. Specify extras on install:
+
+```bash
+# Base install (HTTP core is built-in)
+pip install dist/light_server-*.whl
+
+# With gRPC support
+pip install "dist/light_server-*.whl[grpc]"
+
+# With all extras
+pip install "dist/light_server-*.whl[all]"
 ```
 
 ## Quick Start

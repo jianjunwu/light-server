@@ -37,8 +37,16 @@ grpc = [
     "grpcio>=1.50.0",
     "grpcio-tools>=1.50.0",
 ]
-websocket = []
-all = ["light-server[grpc]"]
+zmq = [
+    "pyzmq>=25.0",
+]
+http = [
+    "light-server[zmq]",
+]
+all = [
+    "light-server[grpc]",
+    "light-server[zmq]",
+]
 
 [dependency-groups]
 dev = [

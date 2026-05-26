@@ -23,9 +23,10 @@ from light_server.config import Config, ModelConfig
 from light_server.core.model_manager import ModelManager
 from light_server.core.registry import ModelRegistry
 from light_server.core.response_buffer import TTLResponseBuffer
+from light_server.core.transport_factory import TransportFactory
 from light_server.http.state import HTTPState
 from light_server.observability import setup_multiproc_metrics, SystemMetrics
-from litserve.transport.process_transport import MPQueueTransport
+from litserve.transport.factory import TransportConfig
 from litserve.utils import ResponseBufferItem
 
 logger = logging.getLogger(__name__)
@@ -63,9 +64,13 @@ class LightServer:
         # Determine HTTP worker count (1 = single-process, >1 = multi-process)
         self._num_http_workers = config.server.http_workers or 1
 
-        # Shared transport: one consumer queue per HTTP worker
-        transport_queues = [self._mp_ctx.Queue() for _ in range(self._num_http_workers)]
-        self.transport = MPQueueTransport(None, transport_queues)
+        # Shared transport: MPQueue or ZMQ based on config
+        tconf = TransportConfig(
+            transport_type=self.config.server.transport,
+            num_consumers=self._num_http_workers,
+        )
+        tconf.manager = self._manager
+        self.transport = TransportFactory.create(tconf)
 
         # Metrics: setup prometheus multiprocess mode before any metric creation
         self._metrics_registry, self._metrics_dir, self._metrics_dir_created = setup_multiproc_metrics()
@@ -438,11 +443,15 @@ class LightServer:
         for entry in self.registry.list_loaded():
             self.model_manager.unload(entry["name"], entry["version"])
 
-        # Close transport queues to unblock the response consumer
+        # Close transport to unblock the response consumer
+        broker = getattr(self.transport, "_broker", None)
         try:
-            self.transport._closed = True
-        except Exception:
-            pass
+            self.transport.close()
+        except ValueError:
+            pass  # ZMQTransport not initialized, safe to ignore
+        if broker:
+            broker.stop()
+        # MPQueue cleanup: close individual queues after sentinel drain
         for q in getattr(self.transport, "_queues", []):
             try:
                 q.close()

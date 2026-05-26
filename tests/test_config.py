@@ -14,6 +14,16 @@ def test_load_config_minimal():
 
     assert config.server.http_port == 9000
     assert config.server.grpc_port == 8001
+    assert config.server.transport == "mp"
+
+
+def test_load_config_transport_zmq():
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump({"server": {"transport": "zmq"}}, f)
+        f.flush()
+        config = load_config(f.name)
+
+    assert config.server.transport == "zmq"
 
 
 def test_load_config_full():

@@ -606,10 +606,17 @@ dependencies = [
 all = [
     { name = "grpcio" },
     { name = "grpcio-tools" },
+    { name = "pyzmq" },
 ]
 grpc = [
     { name = "grpcio" },
     { name = "grpcio-tools" },
+]
+http = [
+    { name = "pyzmq" },
+]
+zmq = [
+    { name = "pyzmq" },
 ]
 
 [package.dev-dependencies]
@@ -632,11 +639,14 @@ requires-dist = [
     { name = "grpcio", marker = "extra == 'grpc'", specifier = ">=1.50.0" },
     { name = "grpcio-tools", marker = "extra == 'grpc'", specifier = ">=1.50.0" },
     { name = "light-server", extras = ["grpc"], marker = "extra == 'all'" },
+    { name = "light-server", extras = ["zmq"], marker = "extra == 'all'" },
+    { name = "light-server", extras = ["zmq"], marker = "extra == 'http'" },
     { name = "litserve", specifier = "==0.2.17" },
     { name = "prometheus-client", specifier = ">=0.15.0" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "pyzmq", marker = "extra == 'zmq'", specifier = ">=25.0" },
 ]
-provides-extras = ["grpc", "websocket", "all"]
+provides-extras = ["grpc", "zmq", "http", "all"]
 
 [package.metadata.requires-dev]
 dev = [

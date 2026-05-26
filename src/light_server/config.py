@@ -23,6 +23,7 @@ class ServerConfig:
     log_level: str = "info"
     num_api_servers: int = 1
     http_workers: int | None = None  # None = auto (max(1, cpu_count() - 1))
+    transport: str = "mp"  # "mp" | "zmq"
 
 
 @dataclass

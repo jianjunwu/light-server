@@ -4,7 +4,7 @@ import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/ui/',
+  base: '/ui/static/',
   build: {
     outDir: 'dist',
     emptyOutDir: true,

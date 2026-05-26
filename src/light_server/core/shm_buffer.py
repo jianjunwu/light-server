@@ -65,7 +65,12 @@ class ShmPayloadBuffer:
 
         try:
             shm = shared_memory.SharedMemory(create=True, size=len(pickled))
-            shm.buf[: len(pickled)] = pickled
+            try:
+                shm.buf[: len(pickled)] = pickled
+            except Exception:
+                shm.close()
+                shm.unlink()
+                raise
             with self._lock:
                 self._created_at[shm.name] = time.monotonic()
             return "shm", (shm.name, len(pickled))

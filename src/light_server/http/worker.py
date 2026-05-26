@@ -54,4 +54,9 @@ def http_worker_main(
     except Exception as exc:
         logger.exception(f"HTTP worker {state.response_queue_id} error: {exc}")
     finally:
+        if state._shm_buffer is not None:
+            try:
+                state._shm_buffer.shutdown()
+            except Exception:
+                pass
         logger.info(f"HTTP worker {state.response_queue_id} exited")

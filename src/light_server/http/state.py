@@ -104,7 +104,7 @@ class HTTPState:
         if self.metrics_dir:
             os.environ["PROMETHEUS_MULTIPROC_DIR"] = self.metrics_dir
 
-        registry, _ = setup_multiproc_metrics(clean=False)
+        registry, _, _ = setup_multiproc_metrics(clean=False)
         self._system_metrics = SystemMetrics(registry)
         self._shm_buffer = ShmPayloadBuffer()
 
@@ -144,6 +144,12 @@ class HTTPState:
             return None
 
         key = f"{name}_{version}"
+        if key in self._hook_cache:
+            # If model was unloaded, invalidate stale cache entry
+            if self.registry.get(name, version) is None:
+                self._hook_cache.pop(key, None)
+                return None
+
         if key not in self._hook_cache:
             entry = self.registry.get(name, version)
             if entry is None:

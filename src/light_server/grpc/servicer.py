@@ -57,6 +57,7 @@ class InferenceServicer(litserve_pb2_grpc.InferenceServicer):
             context.set_details(f"Model {model_name} not ready")
             return litserve_pb2.PredictResponse()
 
+        uid: str | None = None
         try:
             payload = json.loads(request.payload.decode("utf-8"))
             uid = self._server.model_manager.infer(
@@ -68,10 +69,12 @@ class InferenceServicer(litserve_pb2_grpc.InferenceServicer):
 
             if not buffer_item.event.wait(timeout=self._server.config.server.timeout):
                 self._server.response_buffer.pop(uid, None)
+                uid = None
                 context.set_code(grpc.StatusCode.DEADLINE_EXCEEDED)
                 return litserve_pb2.PredictResponse()
 
             response_item = self._server.response_buffer.pop(uid)
+            uid = None
             response_data, status = response_item.response
 
             if status == LitAPIStatus.ERROR:
@@ -91,7 +94,11 @@ class InferenceServicer(litserve_pb2_grpc.InferenceServicer):
         except Exception as e:
             logger.exception(f"gRPC Predict error: {e}")
             context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(e))
             return litserve_pb2.PredictResponse()
+        finally:
+            if uid is not None:
+                self._server.response_buffer.pop(uid, None)
 
     def StreamPredict(self, request: litserve_pb2.PredictRequest, context: grpc.ServicerContext):
         model_name = request.model_name

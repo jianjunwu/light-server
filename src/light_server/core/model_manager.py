@@ -720,10 +720,7 @@ class ModelManager:
         if not isinstance(devices, int):
             devices = 1
 
-        if accelerator == "cpu":
-            device_list = ["cpu"] * devices
-        else:
-            device_list = [f"{accelerator}:{i}" for i in range(devices)]
+        device_list = [f"{accelerator}:{i}" for i in range(devices)]
 
         total_workers = len(device_list) * workers_per_device
         key = self._worker_key(name, version)
@@ -1031,11 +1028,15 @@ def _scan_files(model_dir: Path, patterns: list[str]) -> dict[str, float]:
     return result
 
 
-def _start_file_watcher(lit_api: Any, model_dir: Path, config: dict[str, Any]) -> None:
+def _start_file_watcher(
+    lit_api: Any,
+    model_dir: Path,
+    config: dict[str, Any],
+    stop_event: threading.Event | None = None,
+) -> None:
     """Start a daemon thread that watches model_dir for changed files and notifies the model."""
     import importlib.util
     import sys
-    import threading
 
     patterns = config.get("hot_reload_patterns", ["*.py"])
     interval = config.get("hot_reload_interval", 1.0)
@@ -1043,7 +1044,11 @@ def _start_file_watcher(lit_api: Any, model_dir: Path, config: dict[str, Any]) -
     def watcher() -> None:
         mtimes: dict[str, float] = {}
         while True:
+            if stop_event is not None and stop_event.is_set():
+                break
             time.sleep(interval)
+            if stop_event is not None and stop_event.is_set():
+                break
             current = _scan_files(model_dir, patterns)
             changed_files: list[str] = []
             for path, mtime in current.items():
@@ -1138,22 +1143,29 @@ def _inference_worker_wrapper(
         lit_api.config = config
         lit_api.pre_setup()
 
+        stop_event: threading.Event | None = None
         if config.get("hot_reload", False):
+            stop_event = threading.Event()
             _start_file_watcher(
                 lit_api,
                 Path(model_py_path).parent.resolve(),
                 config,
+                stop_event,
             )
 
-        _inference_worker(
-            lit_api,
-            device,
-            worker_id,
-            request_queue,
-            transport,
-            workers_setup_status,
-            callback_runner,
-            restart_workers=False,
-        )
+        try:
+            _inference_worker(
+                lit_api,
+                device,
+                worker_id,
+                request_queue,
+                transport,
+                workers_setup_status,
+                callback_runner,
+                restart_workers=False,
+            )
+        finally:
+            if stop_event is not None:
+                stop_event.set()
     except Exception as e:
         logger.exception(f"Worker {worker_id} for {name} v{version} crashed: {e}")

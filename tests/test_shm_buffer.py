@@ -145,7 +145,30 @@ class TestShmPayloadBuffer:
         # Either way the segment should not be attachable after GC or shutdown.
 
     # ==================================================================
-    # 7. End-to-end: multiple large payloads tracked correctly
+    # 7. Buffer assignment failure unlinks SHM (leak safety)
+    # ==================================================================
+    def test_buf_assignment_failure_unlinks_shm(self, buf: ShmPayloadBuffer):
+        """If shm.buf[:] assignment fails, the segment must be unlinked."""
+        from unittest.mock import MagicMock, patch
+
+        payload = {"big": "x" * 1000}
+        pickled = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+
+        mock_shm = MagicMock()
+        mock_shm.name = "test-shm-fail"
+        # Simulate buf assignment failure
+        mock_shm.buf = MagicMock()
+        mock_shm.buf.__setitem__ = MagicMock(side_effect=RuntimeError("buf fail"))
+        mock_shm.unlink = MagicMock()
+
+        with patch("multiprocessing.shared_memory.SharedMemory", return_value=mock_shm):
+            mode, data = buf.offload(payload)
+
+        assert mode == "direct"
+        mock_shm.unlink.assert_called_once()
+
+    # ==================================================================
+    # 8. End-to-end: multiple large payloads tracked correctly
     # ==================================================================
     def test_multiple_large_payloads_tracked(self, buf: ShmPayloadBuffer):
         """Buffer should track multiple concurrent shm segments."""

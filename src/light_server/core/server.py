@@ -68,7 +68,7 @@ class LightServer:
         self.transport = MPQueueTransport(None, transport_queues)
 
         # Metrics: setup prometheus multiprocess mode before any metric creation
-        self._metrics_registry, self._metrics_dir = setup_multiproc_metrics()
+        self._metrics_registry, self._metrics_dir, self._metrics_dir_created = setup_multiproc_metrics()
         self.system_metrics = SystemMetrics(self._metrics_registry)
 
         self._log_queue: Any | None = None
@@ -268,7 +268,7 @@ class LightServer:
 
         # Admin IPC queues (shared command queue + per-worker response queues)
         self._admin_queue = self._manager.Queue()
-        admin_response_queues = [self._manager.Queue() for _ in range(num_workers)]
+        self._admin_response_queues = [self._manager.Queue() for _ in range(num_workers)]
 
         # Spawn worker processes
         self._http_worker_procs = []
@@ -281,7 +281,7 @@ class LightServer:
                 repo_path=Path(self.config.model_repository.path),
                 log_queue=self._log_queue,
                 admin_queue=self._admin_queue,
-                admin_response_queue=admin_response_queues[i],
+                admin_response_queue=self._admin_response_queues[i],
                 metrics_dir=self._metrics_dir,
             )
             p = self._mp_ctx.Process(
@@ -470,13 +470,40 @@ class LightServer:
             self._grpc_server.stop(5)
         if self._metrics_server:
             self._metrics_server.shutdown()
+        if self._admin_queue is not None:
+            try:
+                self._admin_queue.close()
+                self._admin_queue.join_thread()
+            except Exception:
+                pass
+        for q in getattr(self, "_admin_response_queues", []):
+            try:
+                q.close()
+                q.join_thread()
+            except Exception:
+                pass
         if self._log_consumer:
             self._log_consumer.stop()
+        if self._log_queue is not None:
+            try:
+                self._log_queue.close()
+                self._log_queue.join_thread()
+            except Exception:
+                pass
         # Clean up prometheus multiprocess temp directory
         if self._metrics_dir and os.path.isdir(self._metrics_dir):
             import shutil
             try:
-                shutil.rmtree(self._metrics_dir)
+                if getattr(self, "_metrics_dir_created", False):
+                    shutil.rmtree(self._metrics_dir)
+                else:
+                    # Only remove prometheus metric files, not user data
+                    import glob
+                    for f in glob.glob(os.path.join(self._metrics_dir, "*.db")):
+                        try:
+                            os.remove(f)
+                        except OSError:
+                            pass
             except OSError as e:
                 logger.warning(f"Failed to clean up metrics dir {self._metrics_dir}: {e}")
         logger.info("Shutdown complete")

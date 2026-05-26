@@ -242,6 +242,9 @@ class EnsembleExecutor:
 
                 return response_data
 
+            except asyncio.CancelledError:
+                state.response_buffer.pop(uid, None)
+                raise
             except asyncio.TimeoutError:
                 state.response_buffer.pop(uid, None)
                 raise InferenceTimeoutError(f"Step '{step.name}' timed out")

@@ -263,31 +263,40 @@ class BidirectionalStreamingLoop(DefaultLoop):
         transport: MessageTransport,
         callback_runner: CallbackRunner,
     ) -> None:
-        while True:
-            try:
-                request_data = request_queue.get(timeout=1.0)
-                if request_data == _SENTINEL_VALUE:
-                    return
+        try:
+            while True:
+                try:
+                    request_data = request_queue.get(timeout=1.0)
+                    if request_data == _SENTINEL_VALUE:
+                        return
 
-                response_queue_id, uid, timestamp, payload = request_data
+                    response_queue_id, uid, timestamp, payload = request_data
 
-                # Detect bidirectional stream messages
-                if isinstance(payload, dict) and "_stream_meta" in payload:
-                    self._handle_stream_message(
-                        payload, response_queue_id, uid, lit_api, transport, callback_runner
+                    # Detect bidirectional stream messages
+                    if isinstance(payload, dict) and "_stream_meta" in payload:
+                        self._handle_stream_message(
+                            payload, response_queue_id, uid, lit_api, transport, callback_runner
+                        )
+                        continue
+
+                    # Regular one-shot streaming request
+                    self._process_request(
+                        response_queue_id, uid, timestamp, payload, lit_api, transport, callback_runner
                     )
+
+                except (Empty, ValueError):
                     continue
-
-                # Regular one-shot streaming request
-                self._process_request(
-                    response_queue_id, uid, timestamp, payload, lit_api, transport, callback_runner
-                )
-
-            except (Empty, ValueError):
-                continue
-            except KeyboardInterrupt:
-                self.kill()
-                return
+                except KeyboardInterrupt:
+                    self.kill()
+                    return
+        finally:
+            # Cancel and join all active stream sessions before exiting
+            sessions_to_clean = list(self.sessions.values())
+            self.sessions.clear()
+            for session in sessions_to_clean:
+                session.cancel()
+                if session.thread is not None:
+                    session.thread.join(timeout=2)
 
     def _handle_stream_message(
         self,

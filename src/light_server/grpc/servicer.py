@@ -233,7 +233,7 @@ class InferenceServicer(litserve_pb2_grpc.InferenceServicer):
                         )
 
                 # Yield any available responses
-                if buffer_item.event.wait(timeout=0.01):
+                if buffer_item.event.wait(timeout=0.05):
                     buffer_item.event.clear()
                     while buffer_item.response_queue:
                         response_data, status = buffer_item.response_queue.popleft()
@@ -256,27 +256,34 @@ class InferenceServicer(litserve_pb2_grpc.InferenceServicer):
 
                 # Exit when reader is done and no more pending input
                 if reader_done.is_set() and input_queue.empty():
-                    # Wait a bit more for final responses
-                    if buffer_item.event.wait(timeout=1.0):
-                        buffer_item.event.clear()
-                        while buffer_item.response_queue:
-                            response_data, status = buffer_item.response_queue.popleft()
-                            if status == LitAPIStatus.FINISH_STREAMING:
-                                yield litserve_pb2.StreamChunk(
-                                    stream_id=stream_id, payload=b"", is_final=True
+                    # Drain all remaining responses with full server timeout
+                    deadline = time.monotonic() + self._server.config.server.timeout
+                    grace_period_end = time.monotonic() + 2.0
+                    while time.monotonic() < deadline:
+                        if buffer_item.event.wait(timeout=0.05):
+                            buffer_item.event.clear()
+                            while buffer_item.response_queue:
+                                response_data, status = buffer_item.response_queue.popleft()
+                                if status == LitAPIStatus.FINISH_STREAMING:
+                                    yield litserve_pb2.StreamChunk(
+                                        stream_id=stream_id, payload=b"", is_final=True
+                                    )
+                                    return
+                                if status == LitAPIStatus.ERROR:
+                                    context.set_code(grpc.StatusCode.INTERNAL)
+                                    return
+                                self._server.system_metrics.record_stream_chunk(
+                                    model_name, version or "1", "grpc", stream_id
                                 )
-                                return
-                            if status == LitAPIStatus.ERROR:
-                                context.set_code(grpc.StatusCode.INTERNAL)
-                                return
-                            self._server.system_metrics.record_stream_chunk(
-                                model_name, version or "1", "grpc", stream_id
-                            )
-                            yield litserve_pb2.StreamChunk(
-                                stream_id=stream_id,
-                                payload=_encode_payload(response_data),
-                                is_final=False,
-                            )
+                                yield litserve_pb2.StreamChunk(
+                                    stream_id=stream_id,
+                                    payload=_encode_payload(response_data),
+                                    is_final=False,
+                                )
+                        else:
+                            # No more responses arriving and queue is empty
+                            if not buffer_item.response_queue and time.monotonic() >= grace_period_end:
+                                break
                     break
 
         except json.JSONDecodeError as e:

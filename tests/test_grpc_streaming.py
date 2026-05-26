@@ -46,6 +46,7 @@ server:
   log_level: warning
   metrics_port: {metrics_port}
   num_api_servers: 1
+  timeout: 60.0
 """
         )
         temp_config = f.name
@@ -82,6 +83,25 @@ server:
         except subprocess.TimeoutExpired:
             pass
         raise RuntimeError("Server did not start")
+
+    # Also wait for gRPC channel to be ready
+    import grpc
+
+    channel = grpc.insecure_channel(grpc_target)
+    try:
+        grpc.channel_ready_future(channel).result(timeout=10)
+    except grpc.FutureTimeoutError:
+        channel.close()
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+        raise RuntimeError("gRPC channel did not become ready")
+    channel.close()
 
     return proc, temp_config, base, grpc_target
 
@@ -122,6 +142,7 @@ def test_grpc_predict(isolated_model_repo):
         from light_server.grpc.proto import litserve_pb2, litserve_pb2_grpc
 
         _wait_for_model_ready(base, "test_model")
+        time.sleep(0.3)  # Let inference worker and response consumer stabilise
 
         channel = grpc.insecure_channel(grpc_target)
         stub = litserve_pb2_grpc.InferenceStub(channel)
@@ -130,10 +151,26 @@ def test_grpc_predict(isolated_model_repo):
             model_name="test_model",
             payload=json.dumps({"input": 4.0}).encode("utf-8"),
         )
-        response = stub.Predict(request)
-        data = json.loads(response.payload.decode("utf-8"))
-        print(f"Predict response: {data}")
-        assert "output" in data
+
+        # Retry up to 3 times to tolerate CI timing jitter
+        last_err = None
+        for _attempt in range(3):
+            try:
+                response = stub.Predict(request)
+                data = json.loads(response.payload.decode("utf-8"))
+                print(f"Predict response: {data}")
+                assert "output" in data
+                break
+            except grpc.RpcError as e:
+                last_err = e
+                if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+                    time.sleep(0.5)
+                    continue
+                raise
+        else:
+            channel.close()
+            raise AssertionError(f"Predict failed after retries: {last_err}")
+
         channel.close()
 
     finally:

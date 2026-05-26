@@ -8,14 +8,29 @@ from typing import Any
 
 from light_server.observability.collector import SystemMetrics
 
+# Max data points per model timeline (ring buffer capacity)
+_MAX_TIMELINE_POINTS = 30
+
 
 class MetricsAggregator:
-    """Aggregates SystemMetrics data into UI-friendly formats."""
+    """Aggregates SystemMetrics data into UI-friendly formats.
 
-    def __init__(self, system_metrics: SystemMetrics) -> None:
+    Core metrics (QPS, percentiles, queue depth, workers) are always computed.
+    Optional features (timeline) are controlled via the ``features`` config.
+    """
+
+    def __init__(
+        self,
+        system_metrics: SystemMetrics,
+        features: Any | None = None,
+    ) -> None:
         self._system_metrics = system_metrics
+        self._features = features
         self._last_counts: dict[str, int] = {}
         self._last_check: float = time.time()
+        # Timeline ring buffers: model_key -> deque of metric snapshots
+        self._timeline: dict[str, deque[dict[str, Any]]] = {}
+        self._last_sample_time: dict[str, float] = {}
 
     def get_summary(self) -> dict[str, Any]:
         """Return global summary metrics."""
@@ -23,8 +38,20 @@ class MetricsAggregator:
             "timestamp": time.time(),
         }
 
-    def get_model_metrics(self, model: str, version: str) -> dict[str, Any] | None:
-        """Return real-time metrics for a specific model version."""
+    def get_model_metrics(
+        self,
+        model: str,
+        version: str,
+        timeline: bool = False,
+    ) -> dict[str, Any] | None:
+        """Return real-time metrics for a specific model version.
+
+        Args:
+            model: Model name.
+            version: Version string.
+            timeline: If True and the timeline feature is enabled, include
+                historical time-series data.
+        """
         key = f"{model}_{version}"
         now = time.time()
 
@@ -63,7 +90,7 @@ class MetricsAggregator:
         history = self._system_metrics.get_qps_history(model, version)
         sparkline = self._build_sparkline(history)
 
-        return {
+        result: dict[str, Any] = {
             "model": model,
             "version": version,
             "qps": qps,
@@ -74,6 +101,48 @@ class MetricsAggregator:
             "queue_depth": int(queue_val),
             "active_workers": int(workers_val),
             "sparkline_svg": sparkline,
+        }
+
+        # Timeline (optional)
+        if timeline and self._features is not None and getattr(self._features, "timeline", False):
+            self._sample_timeline(key, now, qps, p99, queue_val)
+            result["timeline"] = self._get_timeline(key)
+
+        return result
+
+    def _sample_timeline(
+        self,
+        key: str,
+        timestamp: float,
+        qps: float,
+        p99: float,
+        queue_depth: float,
+    ) -> None:
+        """Sample a metric snapshot into the timeline ring buffer."""
+        last = self._last_sample_time.get(key, 0.0)
+        # Sample at most once every 10 seconds to avoid excessive memory use
+        if timestamp - last < 10.0:
+            return
+
+        if key not in self._timeline:
+            self._timeline[key] = deque(maxlen=_MAX_TIMELINE_POINTS)
+
+        self._timeline[key].append({
+            "timestamp": timestamp,
+            "qps": qps,
+            "p99_ms": round(p99 * 1000, 1),
+            "queue_depth": int(queue_depth),
+        })
+        self._last_sample_time[key] = timestamp
+
+    def _get_timeline(self, key: str) -> dict[str, list[Any]]:
+        """Return timeline data structured for charting."""
+        entries = list(self._timeline.get(key, []))
+        return {
+            "timestamps": [e["timestamp"] for e in entries],
+            "qps": [e["qps"] for e in entries],
+            "p99_ms": [e["p99_ms"] for e in entries],
+            "queue_depth": [e["queue_depth"] for e in entries],
         }
 
     def _build_sparkline(self, history: list[tuple[float, float]]) -> str:

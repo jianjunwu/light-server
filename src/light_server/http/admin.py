@@ -95,6 +95,34 @@ def create_admin_routes(app: FastAPI, state: HTTPState) -> None:
             return JSONResponse({"success": True, "message": msg})
         raise ValidationError(f"Failed to unload model {model_name}")
 
+    @app.post("/v2/models/{model_name}/reload")
+    async def reload_model(model_name: str, version: str | None = Query(None)) -> JSONResponse:
+        """Reload a model version (unload then load again)."""
+        validate_model_name(model_name)
+        if version is not None:
+            validate_version(version)
+        success = await state.reload_model(model_name, version)
+        if success:
+            msg = f"Model {model_name}"
+            if version:
+                msg += f" version {version}"
+            msg += " reloaded"
+            return JSONResponse({"success": True, "message": msg})
+        raise ValidationError(f"Failed to reload model {model_name}")
+
+    @app.delete("/v2/models/{model_name}/versions/{version}")
+    async def delete_model_version(model_name: str, version: str) -> JSONResponse:
+        """Delete a model version from the repository."""
+        validate_model_name(model_name)
+        validate_version(version)
+        success = await state.delete_version(model_name, version)
+        if success:
+            return JSONResponse({
+                "success": True,
+                "message": f"Model {model_name} version {version} deleted",
+            })
+        raise ValidationError(f"Failed to delete model {model_name} version {version}")
+
     @app.post("/v2/models/{model_name}/versions/{version}/activate")
     async def activate_version(model_name: str, version: str) -> JSONResponse:
         """Activate a specific version for default inference routing."""

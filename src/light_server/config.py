@@ -82,6 +82,17 @@ class WebUIConfig:
 
 
 @dataclass
+class FeaturesConfig:
+    timeline: bool = False
+    system_overview: bool = True
+    custom_metrics: bool = False
+    benchmarks: bool = True
+    playground: bool = False
+    alerts: bool = True
+    version_compare: bool = False
+
+
+@dataclass
 class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     grpc: GrpcConfig = field(default_factory=GrpcConfig)
@@ -91,6 +102,7 @@ class Config:
     load_models: list[str] = field(default_factory=list)
     webui: WebUIConfig = field(default_factory=WebUIConfig)
     models: list[ModelConfig] = field(default_factory=list)
+    features: FeaturesConfig = field(default_factory=FeaturesConfig)
 
 
 def _to_dataclass(data: dict[str, Any], cls: type) -> Any:
@@ -129,6 +141,8 @@ def load_config(path: str | Path) -> Config:
         config.webui = _to_dataclass(raw["webui"], WebUIConfig)
     if "models" in raw:
         config.models = [_to_dataclass(m, ModelConfig) for m in raw["models"]]
+    if "features" in raw:
+        config.features = _to_dataclass(raw["features"], FeaturesConfig)
 
     # Expand environment variables in paths
     config.model_repository.path = os.path.expandvars(config.model_repository.path)

@@ -120,6 +120,47 @@ def test_metrics_aggregator_with_requests():
     assert data["avg_ms"] >= 0.0
 
 
+def test_metrics_aggregator_timeline_disabled():
+    """Timeline data should not be present when feature is disabled."""
+    from light_server.config import FeaturesConfig
+
+    registry = MagicMock()
+    sm = SystemMetrics(registry)
+    features = FeaturesConfig(timeline=False)
+    agg = MetricsAggregator(sm, features=features)
+
+    data = agg.get_model_metrics("model1", "1", timeline=True)
+    assert "timeline" not in data
+
+
+def test_metrics_aggregator_timeline_enabled():
+    """Timeline data should be present and structured correctly when enabled."""
+    from light_server.config import FeaturesConfig
+
+    registry = MagicMock()
+    sm = SystemMetrics(registry)
+    features = FeaturesConfig(timeline=True)
+    agg = MetricsAggregator(sm, features=features)
+
+    # Simulate requests to generate metrics
+    for i in range(5):
+        sm.record_request_start("model1", "1", f"req-{i}")
+        sm.record_request_end("model1", "1", "2xx", f"req-{i}")
+
+    # First call samples into timeline
+    data = agg.get_model_metrics("model1", "1", timeline=True)
+
+    # Timeline should be present
+    assert "timeline" in data
+    timeline = data["timeline"]
+    assert "timestamps" in timeline
+    assert "qps" in timeline
+    assert "p99_ms" in timeline
+    assert "queue_depth" in timeline
+    assert isinstance(timeline["timestamps"], list)
+    assert isinstance(timeline["qps"], list)
+
+
 # ---------------------------------------------------------------------------
 # UI Routes tests
 # ---------------------------------------------------------------------------
@@ -271,6 +312,96 @@ def test_ui_api_model_load_unload(mock_state, mock_dist):
     assert data["success"] is True
 
     resp = client.post("/ui/api/models/test_model/unload")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+
+
+def test_ui_api_model_reload(mock_state, mock_dist):
+    from unittest.mock import AsyncMock
+
+    mock_state.reload_model = AsyncMock(return_value=True)
+
+    app = FastAPI()
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
+    client = TestClient(app)
+
+    resp = client.post("/ui/api/models/test_model/reload")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+
+
+def test_ui_api_model_delete_version(mock_state, mock_dist):
+    from unittest.mock import AsyncMock
+
+    mock_state.delete_version = AsyncMock(return_value=True)
+
+    app = FastAPI()
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
+    client = TestClient(app)
+
+    resp = client.delete("/ui/api/models/test_model/versions/1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+
+
+def test_ui_api_version_config_get(mock_state, mock_dist):
+    from unittest.mock import AsyncMock
+
+    mock_state.get_version_config = AsyncMock(return_value={"max_batch_size": 8})
+
+    app = FastAPI()
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
+    client = TestClient(app)
+
+    resp = client.get("/ui/api/models/test_model/versions/1/config")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["max_batch_size"] == 8
+
+
+def test_ui_api_version_config_set(mock_state, mock_dist):
+    from unittest.mock import AsyncMock
+
+    mock_state.set_version_config = AsyncMock(return_value=True)
+
+    app = FastAPI()
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
+    client = TestClient(app)
+
+    resp = client.post("/ui/api/models/test_model/versions/1/config", json={"max_batch_size": 16})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+
+
+def test_ui_api_model_config_get(mock_state, mock_dist):
+    from unittest.mock import AsyncMock
+
+    mock_state.get_model_config_api = AsyncMock(return_value={"default_version": "1"})
+
+    app = FastAPI()
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
+    client = TestClient(app)
+
+    resp = client.get("/ui/api/models/test_model/config")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["default_version"] == "1"
+
+
+def test_ui_api_model_config_set(mock_state, mock_dist):
+    from unittest.mock import AsyncMock
+
+    mock_state.set_model_config = AsyncMock(return_value=True)
+
+    app = FastAPI()
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
+    client = TestClient(app)
+
+    resp = client.post("/ui/api/models/test_model/config", json={"default_version": "2"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["success"] is True

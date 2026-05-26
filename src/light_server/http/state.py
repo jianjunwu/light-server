@@ -235,6 +235,48 @@ class HTTPState:
         result = await self._admin_call("unload", name=name, version=version)
         return result.get("success", False)
 
+    async def reload_model(self, name: str, version: str | None = None) -> bool:
+        """Reload a model (direct or via IPC)."""
+        if self._model_manager is not None:
+            return self._model_manager.reload(name, version)
+        result = await self._admin_call("reload", name=name, version=version)
+        return result.get("success", False)
+
+    async def delete_version(self, name: str, version: str) -> bool:
+        """Delete a model version (direct or via IPC)."""
+        if self._model_manager is not None:
+            return self._model_manager.delete_version(name, version)
+        result = await self._admin_call("delete_version", name=name, version=version)
+        return result.get("success", False)
+
+    async def get_version_config(self, name: str, version: str) -> dict[str, Any]:
+        """Get version-level config (direct or via IPC)."""
+        if self._model_manager is not None:
+            return self._model_manager.get_version_config(name, version)
+        result = await self._admin_call("get_version_config", name=name, version=version)
+        return result.get("config", {})
+
+    async def set_version_config(self, name: str, version: str, data: dict[str, Any]) -> bool:
+        """Set version-level config (direct or via IPC)."""
+        if self._model_manager is not None:
+            return self._model_manager.set_version_config(name, version, data)
+        result = await self._admin_call("set_version_config", name=name, version=version, data=data)
+        return result.get("success", False)
+
+    async def get_model_config_api(self, name: str) -> dict[str, Any]:
+        """Get model-level config via API (avoids collision with get_model_config hook)."""
+        if self._model_manager is not None:
+            return self._model_manager.get_model_config(name)
+        result = await self._admin_call("get_model_config", name=name)
+        return result.get("config", {})
+
+    async def set_model_config(self, name: str, data: dict[str, Any]) -> bool:
+        """Set model-level config (direct or via IPC)."""
+        if self._model_manager is not None:
+            return self._model_manager.set_model_config(name, data)
+        result = await self._admin_call("set_model_config", name=name, data=data)
+        return result.get("success", False)
+
     async def activate_model(self, name: str, version: str) -> bool:
         """Activate a model version (local registry operation)."""
         if self._model_manager is not None:

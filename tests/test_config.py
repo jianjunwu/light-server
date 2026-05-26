@@ -3,7 +3,42 @@ from pathlib import Path
 
 import yaml
 
-from light_server.config import Config, load_config
+from light_server.config import Config, FeaturesConfig, load_config
+
+
+def test_features_config_defaults():
+    """FeaturesConfig should have sensible defaults."""
+    cfg = FeaturesConfig()
+    assert cfg.timeline is False
+    assert cfg.system_overview is True
+    assert cfg.custom_metrics is False
+    assert cfg.benchmarks is True
+    assert cfg.playground is False
+    assert cfg.alerts is True
+    assert cfg.version_compare is False
+
+
+def test_load_config_with_features():
+    """Load config with explicit features block."""
+    data = {
+        "features": {
+            "timeline": True,
+            "custom_metrics": True,
+            "playground": True,
+        }
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(data, f)
+        f.flush()
+        config = load_config(f.name)
+
+    assert config.features.timeline is True
+    assert config.features.system_overview is True  # default unchanged
+    assert config.features.custom_metrics is True
+    assert config.features.playground is True
+    assert config.features.benchmarks is True  # default
+    assert config.features.alerts is True  # default
+    assert config.features.version_compare is False  # default
 
 
 def test_load_config_minimal():

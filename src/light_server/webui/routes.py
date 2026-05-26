@@ -170,6 +170,70 @@ def create_ui_routes(app: FastAPI, state: Any, dist_dir: Path | None = None) -> 
         models = _build_dashboard_models()
         return JSONResponse({"success": True, "models": models})
 
+    @app.post("/ui/api/models/{model_name}/reload")
+    async def api_reload_model(
+        request: Request,
+        model_name: str,
+        version: str | None = Query(None),
+    ) -> JSONResponse:
+        success = await state.reload_model(model_name, version=version)
+        if not success:
+            raise HTTPException(status_code=400, detail=f"Failed to reload {model_name}")
+        models = _build_dashboard_models()
+        return JSONResponse({"success": True, "models": models})
+
+    @app.get("/ui/api/models/{model_name}/versions/{version}/config")
+    async def api_get_version_config(
+        request: Request,
+        model_name: str,
+        version: str,
+    ) -> JSONResponse:
+        cfg = await state.get_version_config(model_name, version)
+        return JSONResponse(cfg)
+
+    @app.post("/ui/api/models/{model_name}/versions/{version}/config")
+    async def api_set_version_config(
+        request: Request,
+        model_name: str,
+        version: str,
+    ) -> JSONResponse:
+        body = await request.json()
+        success = await state.set_version_config(model_name, version, body)
+        if not success:
+            raise HTTPException(status_code=400, detail=f"Failed to save config for {model_name} v{version}")
+        return JSONResponse({"success": True})
+
+    @app.get("/ui/api/models/{model_name}/config")
+    async def api_get_model_config(
+        request: Request,
+        model_name: str,
+    ) -> JSONResponse:
+        cfg = await state.get_model_config_api(model_name)
+        return JSONResponse(cfg)
+
+    @app.post("/ui/api/models/{model_name}/config")
+    async def api_set_model_config(
+        request: Request,
+        model_name: str,
+    ) -> JSONResponse:
+        body = await request.json()
+        success = await state.set_model_config(model_name, body)
+        if not success:
+            raise HTTPException(status_code=400, detail=f"Failed to save config for {model_name}")
+        return JSONResponse({"success": True})
+
+    @app.delete("/ui/api/models/{model_name}/versions/{version}")
+    async def api_delete_version(
+        request: Request,
+        model_name: str,
+        version: str,
+    ) -> JSONResponse:
+        success = await state.delete_version(model_name, version)
+        if not success:
+            raise HTTPException(status_code=400, detail=f"Failed to delete {model_name} v{version}")
+        models = _build_dashboard_models()
+        return JSONResponse({"success": True, "models": models})
+
     @app.post("/ui/api/models/{model_name}/versions/{version}/activate")
     async def api_activate_version(
         request: Request,

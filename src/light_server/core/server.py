@@ -333,6 +333,24 @@ class LightServer:
                     elif cmd_type == "unload":
                         success = self.model_manager.unload(cmd["name"], cmd.get("version"))
                         response_queue.put({"success": success})
+                    elif cmd_type == "reload":
+                        success = self.model_manager.reload(cmd["name"], cmd.get("version"))
+                        response_queue.put({"success": success})
+                    elif cmd_type == "delete_version":
+                        success = self.model_manager.delete_version(cmd["name"], cmd["version"])
+                        response_queue.put({"success": success})
+                    elif cmd_type == "get_version_config":
+                        cfg = self.model_manager.get_version_config(cmd["name"], cmd["version"])
+                        response_queue.put({"config": cfg})
+                    elif cmd_type == "set_version_config":
+                        success = self.model_manager.set_version_config(cmd["name"], cmd["version"], cmd["data"])
+                        response_queue.put({"success": success})
+                    elif cmd_type == "get_model_config":
+                        cfg = self.model_manager.get_model_config(cmd["name"])
+                        response_queue.put({"config": cfg})
+                    elif cmd_type == "set_model_config":
+                        success = self.model_manager.set_model_config(cmd["name"], cmd["data"])
+                        response_queue.put({"success": success})
                     else:
                         response_queue.put({"success": False, "error": f"Unknown cmd: {cmd_type}"})
                 except Exception as exc:

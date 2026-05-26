@@ -416,6 +416,91 @@ class ModelManager:
                 self.registry.set_status(name, version, "ERROR")
             return False
 
+    def reload(self, name: str, version: str | None = None) -> bool:
+        """Reload a model version: unload then load again.
+
+        Preserves the active version state. If version is None, reloads
+        the currently active version.
+        """
+        try:
+            validate_model_name(name)
+            if version is not None:
+                validate_version(version)
+        except ValidationError as exc:
+            logger.warning(f"Invalid model name or version: {exc}")
+            return False
+
+        if version is None:
+            version = self.registry.get_active_version(name)
+        if version is None:
+            logger.warning(f"No active version for {name} to reload")
+            return False
+
+        # Capture current config from registry
+        entry = self.registry.get(name, version)
+        if entry is None:
+            logger.warning(f"Model {name} version {version} is not loaded")
+            return False
+
+        model_config = entry.get("config", {})
+        was_active = self.registry.get_active_version(name) == version
+
+        logger.info(f"Reloading {name} version {version}")
+        if not self._unload_version(name, version):
+            logger.error(f"Failed to unload {name} version {version} during reload")
+            return False
+
+        # Small delay to ensure workers are fully terminated
+        time.sleep(0.5)
+
+        success = self.load(name, version)
+        if success and was_active:
+            self.registry.activate_version(name, version)
+
+        if success:
+            logger.info(f"Reloaded {name} version {version} successfully")
+        else:
+            logger.error(f"Failed to reload {name} version {version}")
+        return success
+
+    def delete_version(self, name: str, version: str) -> bool:
+        """Delete a model version from the repository.
+
+        Unloads the version if it is loaded, then removes the version
+        directory from the filesystem.
+        """
+        try:
+            validate_model_name(name)
+            validate_version(version)
+        except ValidationError as exc:
+            logger.warning(f"Invalid model name or version: {exc}")
+            return False
+
+        key = self._worker_key(name, version)
+
+        # Unload if currently loaded
+        if key in self._workers:
+            logger.info(f"Unloading {name} version {version} before deletion")
+            if not self._unload_version(name, version):
+                logger.error(f"Failed to unload {name} version {version} before deletion")
+                return False
+
+        # Remove version directory
+        model_dir = self._resolve_model_base(name) / version
+        if not model_dir.exists():
+            logger.warning(f"Version directory not found: {model_dir}")
+            return True  # Already gone
+
+        try:
+            import shutil
+            shutil.rmtree(model_dir)
+            logger.info(f"Deleted {name} version {version} from {model_dir}")
+        except Exception as e:
+            logger.exception(f"Failed to delete {model_dir}: {e}")
+            return False
+
+        return True
+
     def unload(self, name: str, version: str | None = None) -> bool:
         """Unload a model version and stop its workers.
 
@@ -634,6 +719,58 @@ class ModelManager:
             with open(config_path, "r", encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
         return {}
+
+    def get_version_config(self, name: str, version: str) -> dict[str, Any]:
+        """Read version-level config from model_repo/{name}/{version}/config.yaml."""
+        try:
+            validate_model_name(name)
+            validate_version(version)
+        except ValidationError as exc:
+            logger.warning(f"Invalid model name or version: {exc}")
+            return {}
+        import yaml
+        config_path = self._resolve_model_base(name) / version / "config.yaml"
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        return {}
+
+    def set_version_config(self, name: str, version: str, data: dict[str, Any]) -> bool:
+        """Write version-level config to model_repo/{name}/{version}/config.yaml."""
+        try:
+            validate_model_name(name)
+            validate_version(version)
+        except ValidationError as exc:
+            logger.warning(f"Invalid model name or version: {exc}")
+            return False
+        import yaml
+        config_path = self._resolve_model_base(name) / version / "config.yaml"
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to write version config: {e}")
+            return False
+
+    def set_model_config(self, name: str, data: dict[str, Any]) -> bool:
+        """Write model-level config to model_repo/{name}/model_config.yaml."""
+        try:
+            validate_model_name(name)
+        except ValidationError as exc:
+            logger.warning(f"Invalid model name: {exc}")
+            return False
+        import yaml
+        config_path = self._resolve_model_base(name) / "model_config.yaml"
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to write model config: {e}")
+            return False
 
     def shutdown(self) -> None:
         """Release all shared memory and other resources."""

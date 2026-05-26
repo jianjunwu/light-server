@@ -23,6 +23,7 @@ def _get_free_port() -> int:
 
 def _make_server_config(repo_path: Path, http_port: int, load_models: list[str]) -> str:
     """Generate a minimal server config YAML."""
+    model_lines = "".join("  - " + m + "\n" for m in load_models)
     return f"""server:
   host: 127.0.0.1
   http_port: {http_port}
@@ -36,7 +37,7 @@ model_repository:
   path: {repo_path}
   control_mode: explicit
 load_models:
-{"".join("  - " + m + "\n" for m in load_models)}
+{model_lines}
 """
 
 

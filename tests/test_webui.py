@@ -163,45 +163,56 @@ def mock_state(tmp_path: Path):
     return state
 
 
-def test_ui_dashboard_page(mock_state):
+@pytest.fixture
+def mock_dist(tmp_path: Path):
+    """Create a temporary dist directory for SPA fallback testing."""
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+    (dist_dir / "index.html").write_text("<html><body>SPA</body></html>")
+    (dist_dir / "assets").mkdir()
+    (dist_dir / "assets" / "app.js").write_text("console.log('app')")
+    return dist_dir
+
+
+def test_ui_dashboard_page(mock_state, mock_dist):
     app = FastAPI()
-    create_ui_routes(app, mock_state)
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
     client = TestClient(app)
     resp = client.get("/ui/")
     assert resp.status_code == 200
-    assert "Dashboard" in resp.text
+    assert "SPA" in resp.text
 
 
-def test_ui_repository_page(mock_state):
+def test_ui_repository_page(mock_state, mock_dist):
     app = FastAPI()
-    create_ui_routes(app, mock_state)
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
     client = TestClient(app)
     resp = client.get("/ui/repository")
     assert resp.status_code == 200
-    assert "Repository" in resp.text
+    assert "SPA" in resp.text
 
 
-def test_ui_benchmarks_page(mock_state):
+def test_ui_benchmarks_page(mock_state, mock_dist):
     app = FastAPI()
-    create_ui_routes(app, mock_state)
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
     client = TestClient(app)
     resp = client.get("/ui/benchmarks")
     assert resp.status_code == 200
-    assert "Benchmarks" in resp.text
+    assert "SPA" in resp.text
 
 
-def test_ui_config_page(mock_state):
+def test_ui_config_page(mock_state, mock_dist):
     app = FastAPI()
-    create_ui_routes(app, mock_state)
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
     client = TestClient(app)
     resp = client.get("/ui/config")
     assert resp.status_code == 200
-    assert "Configuration" in resp.text
+    assert "SPA" in resp.text
 
 
-def test_ui_api_config_get(mock_state):
+def test_ui_api_config_get(mock_state, mock_dist):
     app = FastAPI()
-    create_ui_routes(app, mock_state)
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
     client = TestClient(app)
     resp = client.get("/ui/api/config")
     assert resp.status_code == 200
@@ -210,9 +221,9 @@ def test_ui_api_config_get(mock_state):
     assert "webui" in data
 
 
-def test_ui_api_reports_empty(mock_state):
+def test_ui_api_reports_empty(mock_state, mock_dist):
     app = FastAPI()
-    create_ui_routes(app, mock_state)
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
     client = TestClient(app)
     resp = client.get("/ui/api/reports")
     assert resp.status_code == 200
@@ -220,100 +231,107 @@ def test_ui_api_reports_empty(mock_state):
     assert data["reports"] == []
 
 
-def test_ui_static_files(mock_state):
+def test_ui_static_files(mock_state, mock_dist):
     app = FastAPI()
-    create_ui_routes(app, mock_state)
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
     client = TestClient(app)
-    resp = client.get("/ui/static/vendor/htmx.min.js")
+    resp = client.get("/ui/static/assets/app.js")
     assert resp.status_code == 200
-    assert "htmx" in resp.text
-
-    resp = client.get("/ui/static/vendor/pico.min.css")
-    assert resp.status_code == 200
-    assert "Pico" in resp.text
+    assert "console.log" in resp.text
 
 
-def test_ui_api_metrics_summary(mock_state):
+def test_ui_api_metrics_summary(mock_state, mock_dist):
     mock_state.list_repository.return_value = [
         {"name": "test_model", "version": "1", "type": "litapi"},
     ]
     app = FastAPI()
-    create_ui_routes(app, mock_state)
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
     client = TestClient(app)
     resp = client.get("/ui/api/metrics/summary")
     assert resp.status_code == 200
-    assert "test_model" in resp.text
+    data = resp.json()
+    assert isinstance(data, dict)
+    assert "models" in data
+    assert any(m["name"] == "test_model" for m in data["models"])
 
 
-def test_ui_api_model_load_unload(mock_state):
+def test_ui_api_model_load_unload(mock_state, mock_dist):
     from unittest.mock import AsyncMock
 
     mock_state.load_model = AsyncMock(return_value=True)
     mock_state.unload_model = AsyncMock(return_value=True)
 
     app = FastAPI()
-    create_ui_routes(app, mock_state)
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
     client = TestClient(app)
 
     resp = client.post("/ui/api/models/test_model/load")
     assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
 
     resp = client.post("/ui/api/models/test_model/unload")
     assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
 
 
-def test_ui_artifact_upload_invalid_extension(mock_state):
+def test_ui_artifact_upload_invalid_extension(mock_state, mock_dist):
     app = FastAPI()
-    create_ui_routes(app, mock_state)
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
     client = TestClient(app)
     resp = client.post(
         "/ui/api/artifacts/upload",
         files={"file": ("bad.txt", b"not an lma", "text/plain")},
     )
     assert resp.status_code == 400
-    assert "Invalid file" in resp.text
+    data = resp.json()
+    assert "detail" in data
 
 
-def test_ui_config_save(mock_state, tmp_path: Path):
+def test_ui_config_save(mock_state, mock_dist, tmp_path: Path):
     config_path = tmp_path / "test_config.yaml"
     config_path.write_text("server:\n  http_port: 8000\n")
     mock_state._config_path = str(config_path)
 
     app = FastAPI()
-    create_ui_routes(app, mock_state)
+    create_ui_routes(app, mock_state, dist_dir=mock_dist)
     client = TestClient(app)
 
-    resp = client.post(
-        "/ui/api/config",
-        data={
-            "http_port": "9000",
-            "grpc_port": "8001",
-            "metrics_port": "8002",
+    payload = {
+        "server": {
+            "http_port": 9000,
+            "grpc_port": 8001,
+            "metrics_port": 8002,
             "host": "127.0.0.1",
             "accelerator": "cpu",
-            "devices": "1",
-            "workers_per_device": "2",
-            "timeout": "60.0",
+            "devices": 1,
+            "workers_per_device": 2,
+            "timeout": 60.0,
             "log_level": "debug",
-            "grpc_enabled": "on",
-            "grpc_max_workers": "5",
-            "metrics_enabled": "on",
-            "log_format": "text",
-            "log_rotate_by": "size",
-            "log_max_size": "200",
-            "log_when": "midnight",
-            "log_backup_count": "14",
-            "repo_path": "./models",
-            "control_mode": "poll",
-            "poll_interval": "10",
-            "webui_enabled": "on",
-            "report_retention_days": "60",
         },
-        follow_redirects=False,
-    )
-    # Should redirect to config page
-    assert resp.status_code == 302
-    assert "/ui/config" in resp.headers.get("location", "")
+        "grpc": {"enabled": True, "max_workers": 5},
+        "metrics": {"enabled": True},
+        "logging": {
+            "format": "text",
+            "rotate_by": "size",
+            "max_size": 200,
+            "when": "midnight",
+            "backup_count": 14,
+        },
+        "model_repository": {
+            "path": "./models",
+            "control_mode": "poll",
+            "poll_interval": 10,
+        },
+        "webui": {"enabled": True, "report_retention_days": 60},
+        "load_models": [],
+    }
+
+    resp = client.post("/ui/api/config", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
 
     # Verify file was written
     saved = config_path.read_text()

@@ -11,20 +11,11 @@ from typing import Any
 
 import yaml
 from fastapi import FastAPI, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 from light_server.analyzer.benchmark import BenchmarkEngine, HttpBenchmarkTarget
-from light_server.config import (
-    Config,
-    GrpcConfig,
-    LoggingConfig,
-    MetricsConfig,
-    ModelRepositoryConfig,
-    ServerConfig,
-    WebUIConfig,
-)
+from light_server.config import Config, load_config
 from light_server.webui.metrics_agg import MetricsAggregator
 from light_server.webui.store import BenchmarkReportStore
 
@@ -34,17 +25,13 @@ logger = logging.getLogger(__name__)
 _job_store: dict[str, dict[str, Any]] = {}
 _benchmark_running = False
 
-def _get_templates() -> Jinja2Templates:
-    tpl_dir = Path(__file__).parent / "templates"
-    return Jinja2Templates(directory=str(tpl_dir))
 
-
-def create_ui_routes(app: FastAPI, state: Any) -> None:
+def create_ui_routes(app: FastAPI, state: Any, dist_dir: Path | None = None) -> None:
     """Register Web UI routes and static files on the FastAPI app."""
-    static_dir = Path(__file__).parent / "static"
-    app.mount("/ui/static", StaticFiles(directory=str(static_dir)), name="ui_static")
+    if dist_dir is None:
+        dist_dir = Path(__file__).parent / "static" / "dist"
+    app.mount("/ui/static", StaticFiles(directory=str(dist_dir)), name="ui_static")
 
-    tpl = _get_templates()
     report_store = BenchmarkReportStore(
         retention_days=state.config.webui.report_retention_days
     )
@@ -101,122 +88,12 @@ def create_ui_routes(app: FastAPI, state: Any) -> None:
         return models
 
     # ------------------------------------------------------------------
-    # Page: Dashboard
-    # ------------------------------------------------------------------
-    @app.get("/ui/", response_class=HTMLResponse)
-    async def page_dashboard(request: Request) -> HTMLResponse:
-        is_htmx = request.headers.get("HX-Request") == "true"
-        models = _build_dashboard_models()
-        if is_htmx:
-            return tpl.TemplateResponse(request, "dashboard_cards.html", {
-            "models": models
-        })
-        return tpl.TemplateResponse(request, "dashboard.html", {
-            "active_page": "dashboard",
-            "models": models
-        })
-
-    # ------------------------------------------------------------------
-    # Page: Model Detail
-    # ------------------------------------------------------------------
-    @app.get("/ui/models/{model_name}", response_class=HTMLResponse)
-    async def page_model_detail(request: Request, model_name: str) -> HTMLResponse:
-        is_htmx = request.headers.get("HX-Request") == "true"
-        versions = state.registry.list_versions(model_name)
-        active = state.registry.get_active_version(model_name)
-        # Also include available versions from repo
-        available = state.list_repository()
-        seen_versions = {v["version"] for v in versions}
-        for a in available:
-            if a["name"] == model_name and a["version"] not in seen_versions:
-                versions.append({
-                    "version": a["version"],
-                    "status": "NOT_LOADED",
-                    "model_type": a.get("type", "litapi"),
-                    "workers": 0,
-                })
-        metrics = metrics_agg.get_model_metrics(model_name, active or "1") or {}
-        if is_htmx:
-            return tpl.TemplateResponse(request, "model_detail.html", {
-            "model_name": model_name,
-                "versions": versions,
-                "active_version": active,
-                "metrics": metrics
-        })
-        return tpl.TemplateResponse(request, "model_detail.html", {
-            "active_page": "dashboard",
-            "model_name": model_name,
-            "versions": versions,
-            "active_version": active,
-            "metrics": metrics
-        })
-
-    # ------------------------------------------------------------------
-    # Page: Repository
-    # ------------------------------------------------------------------
-    @app.get("/ui/repository", response_class=HTMLResponse)
-    async def page_repository(request: Request) -> HTMLResponse:
-        is_htmx = request.headers.get("HX-Request") == "true"
-        repo_models = state.list_repository()
-        if is_htmx:
-            return tpl.TemplateResponse(request, "repository.html", {
-            "repo_models": repo_models
-        })
-        return tpl.TemplateResponse(request, "repository.html", {
-            "active_page": "repository",
-            "repo_models": repo_models
-        })
-
-    # ------------------------------------------------------------------
-    # Page: Benchmarks
-    # ------------------------------------------------------------------
-    @app.get("/ui/benchmarks", response_class=HTMLResponse)
-    async def page_benchmarks(request: Request) -> HTMLResponse:
-        reports = report_store.list()
-        return tpl.TemplateResponse(request, "benchmark_list.html", {
-            "active_page": "benchmarks",
-            "reports": reports
-        })
-
-    @app.get("/ui/benchmarks/new", response_class=HTMLResponse)
-    async def page_benchmark_new(request: Request) -> HTMLResponse:
-        models = state.registry.list_loaded()
-        return tpl.TemplateResponse(request, "benchmark_form.html", {
-            "active_page": "benchmarks",
-            "models": models
-        })
-
-    @app.get("/ui/benchmarks/{report_id}", response_class=HTMLResponse)
-    async def page_benchmark_detail(request: Request, report_id: str) -> HTMLResponse:
-        report = report_store.get(report_id)
-        if report is None:
-            raise HTTPException(status_code=404, detail="Report not found")
-        return tpl.TemplateResponse(request, "benchmark_detail.html", {
-            "active_page": "benchmarks",
-            "report": report
-        })
-
-    # ------------------------------------------------------------------
-    # Page: Config
-    # ------------------------------------------------------------------
-    @app.get("/ui/config", response_class=HTMLResponse)
-    async def page_config(request: Request, saved: bool = False, error: str = "") -> HTMLResponse:
-        return tpl.TemplateResponse(request, "config_edit.html", {
-            "active_page": "config",
-            "cfg": state.config,
-            "saved": saved,
-            "error": error
-        })
-
-    # ------------------------------------------------------------------
     # API: Metrics
     # ------------------------------------------------------------------
     @app.get("/ui/api/metrics/summary")
-    async def api_metrics_summary(request: Request) -> HTMLResponse:
+    async def api_metrics_summary() -> JSONResponse:
         models = _build_dashboard_models()
-        return tpl.TemplateResponse(request, "dashboard_cards.html", {
-            "models": models
-        })
+        return JSONResponse({"models": models})
 
     @app.get("/ui/api/metrics/{model}/{version}")
     async def api_model_metrics(model: str, version: str) -> JSONResponse:
@@ -231,9 +108,9 @@ def create_ui_routes(app: FastAPI, state: Any) -> None:
         request: Request,
         file: UploadFile,
         verify_signature: bool = Form(False),
-    ) -> HTMLResponse:
+    ) -> JSONResponse:
         if not file.filename or not file.filename.endswith(".lma"):
-            return HTMLResponse(content="<span style='color:#991b1b;'>Invalid file. Must be .lma</span>", status_code=400)
+            raise HTTPException(status_code=400, detail="Invalid file. Must be .lma")
         import tempfile
         import shutil
         from light_server.artifact.unpacker import ModelUnpacker
@@ -254,17 +131,17 @@ def create_ui_routes(app: FastAPI, state: Any) -> None:
             # Security: sanitize filename to prevent path traversal
             safe_name = Path(file.filename).name
             if ".." in safe_name or "/" in safe_name or "\\" in safe_name or not safe_name.endswith(".lma"):
-                return HTMLResponse(
-                    content="<span style='color:#991b1b;'>Invalid filename</span>",
-                    status_code=400,
-                )
+                raise HTTPException(status_code=400, detail="Invalid filename")
             dest = Path(state.config.model_repository.path) / safe_name
             shutil.copy2(tmp_path, dest)
-            return HTMLResponse(
-                content=f"<span style='color:#166534;'>Uploaded {manifest.name} v{manifest.version}</span>"
-            )
+            return JSONResponse({
+                "success": True,
+                "name": manifest.name,
+                "version": manifest.version,
+            })
         except Exception as e:
-            return HTMLResponse(content=f"<span style='color:#991b1b;'>Upload failed: {e}</span>", status_code=400)
+            logger.exception("Artifact upload failed")
+            raise HTTPException(status_code=400, detail=f"Upload failed: {e}")
         finally:
             tmp_path.unlink(missing_ok=True)
 
@@ -276,37 +153,33 @@ def create_ui_routes(app: FastAPI, state: Any) -> None:
         request: Request,
         model_name: str,
         version: str = Query("1"),
-    ) -> HTMLResponse:
+    ) -> JSONResponse:
         success = await state.load_model(model_name, version=version)
         if not success:
-            return HTMLResponse(content=f"<span style='color:#991b1b;'>Failed to load {model_name}</span>", status_code=400)
+            raise HTTPException(status_code=400, detail=f"Failed to load {model_name}")
         models = _build_dashboard_models()
-        return tpl.TemplateResponse(request, "dashboard_cards.html", {
-            "models": models
-        })
+        return JSONResponse({"success": True, "models": models})
 
     @app.post("/ui/api/models/{model_name}/unload")
     async def api_unload_model(
         request: Request,
         model_name: str,
         version: str | None = Query(None),
-    ) -> HTMLResponse:
+    ) -> JSONResponse:
         await state.unload_model(model_name, version=version)
         models = _build_dashboard_models()
-        return tpl.TemplateResponse(request, "dashboard_cards.html", {
-            "models": models
-        })
+        return JSONResponse({"success": True, "models": models})
 
     @app.post("/ui/api/models/{model_name}/versions/{version}/activate")
     async def api_activate_version(
         request: Request,
         model_name: str,
         version: str,
-    ) -> HTMLResponse:
+    ) -> JSONResponse:
         success = await state.activate_model(model_name, version)
         if not success:
-            return HTMLResponse(content=f"<span style='color:#991b1b;'>Failed to activate {model_name} v{version}</span>", status_code=400)
-        return RedirectResponse(url=f"/ui/models/{model_name}", status_code=302)
+            raise HTTPException(status_code=400, detail=f"Failed to activate {model_name} v{version}")
+        return JSONResponse({"success": True})
 
     # ------------------------------------------------------------------
     # API: Benchmarks
@@ -321,13 +194,10 @@ def create_ui_routes(app: FastAPI, state: Any) -> None:
         duration: float = Form(30.0),
         payload: str = Form('{"input": 1.0}'),
         protocol: str = Form("http"),
-    ) -> HTMLResponse:
+    ) -> JSONResponse:
         global _benchmark_running
         if _benchmark_running:
-            return HTMLResponse(
-                content="<span style='color:#991b1b;'>Another benchmark is already running.</span>",
-                status_code=429,
-            )
+            raise HTTPException(status_code=429, detail="Another benchmark is already running.")
         _benchmark_running = True
         job_id = f"bm_{asyncio.get_event_loop().time()}"
         _job_store[job_id] = {"status": "queued", "progress": 0}
@@ -347,43 +217,19 @@ def create_ui_routes(app: FastAPI, state: Any) -> None:
             )
         )
 
-        return HTMLResponse(
-            content=f"""
-            <div hx-get="/ui/api/benchmarks/{job_id}/status"
-                 hx-trigger="every 2s"
-                 hx-swap="innerHTML">
-              <p>Benchmark started...</p>
-              <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
-            </div>
-            """
-        )
+        return JSONResponse({"job_id": job_id})
 
     @app.get("/ui/api/benchmarks/{job_id}/status")
-    async def api_benchmark_status(job_id: str) -> HTMLResponse:
+    async def api_benchmark_status(job_id: str) -> JSONResponse:
         job = _job_store.get(job_id, {"status": "unknown", "progress": 0})
         status = job.get("status", "unknown")
         progress = job.get("progress", 0)
+        result: dict[str, Any] = {"status": status, "progress": progress}
         if status == "completed":
-            report_id = job.get("report_id", "")
-            return HTMLResponse(
-                content=f"""
-                <p style="color:#166534;">Benchmark completed!</p>
-                <a href="/ui/benchmarks/{report_id}" role="button">View Report</a>
-                """
-            )
+            result["report_id"] = job.get("report_id", "")
         if status == "failed":
-            error = job.get("error", "Unknown error")
-            return HTMLResponse(
-                content=f"""<p style="color:#991b1b;">Benchmark failed: {error}</p>
-                <div class="progress-bar"><div class="progress-fill" style="width:100%"></div></div>
-                """
-            )
-        return HTMLResponse(
-            content=f"""
-            <p>Running... {progress}%</p>
-            <div class="progress-bar"><div class="progress-fill" style="width:{progress}%"></div></div>
-            """
-        )
+            result["error"] = job.get("error", "Unknown error")
+        return JSONResponse(result)
 
     # ------------------------------------------------------------------
     # API: Reports
@@ -417,80 +263,27 @@ def create_ui_routes(app: FastAPI, state: Any) -> None:
         return JSONResponse(_config_to_dict(state.config))
 
     @app.post("/ui/api/config")
-    async def api_save_config(
-        request: Request,
-        http_port: int = Form(8000),
-        grpc_port: int = Form(8001),
-        metrics_port: int = Form(8002),
-        host: str = Form("0.0.0.0"),
-        accelerator: str = Form("auto"),
-        devices: str = Form("auto"),
-        workers_per_device: int = Form(1),
-        timeout: float = Form(30.0),
-        log_level: str = Form("info"),
-        grpc_enabled: bool = Form(False),
-        grpc_max_workers: int = Form(10),
-        metrics_enabled: bool = Form(False),
-        log_format: str = Form("json"),
-        log_rotate_by: str = Form("none"),
-        log_max_size: int = Form(100),
-        log_when: str = Form("midnight"),
-        log_backup_count: int = Form(7),
-        repo_path: str = Form("./model_repo"),
-        control_mode: str = Form("explicit"),
-        poll_interval: int = Form(5),
-        webui_enabled: bool = Form(False),
-        report_retention_days: int = Form(30),
-        load_models: list[str] = Form(default_factory=list),
-    ) -> HTMLResponse:
+    async def api_save_config(payload: Config) -> JSONResponse:
         try:
-            new_cfg = Config(
-                server=ServerConfig(
-                    http_port=http_port,
-                    grpc_port=grpc_port,
-                    metrics_port=metrics_port,
-                    host=host,
-                    accelerator=accelerator,
-                    devices=devices,
-                    workers_per_device=workers_per_device,
-                    timeout=timeout,
-                    log_level=log_level,
-                ),
-                grpc=GrpcConfig(
-                    enabled=grpc_enabled,
-                    max_workers=grpc_max_workers,
-                ),
-                metrics=MetricsConfig(
-                    enabled=metrics_enabled,
-                ),
-                logging=LoggingConfig(
-                    format=log_format,
-                    rotate_by=log_rotate_by,
-                    max_size=log_max_size,
-                    when=log_when,
-                    backup_count=log_backup_count,
-                ),
-                model_repository=ModelRepositoryConfig(
-                    path=repo_path,
-                    control_mode=control_mode,
-                    poll_interval=poll_interval,
-                ),
-                webui=WebUIConfig(
-                    enabled=webui_enabled,
-                    report_retention_days=report_retention_days,
-                ),
-                load_models=load_models,
-            )
-            # Write back to the original config file if known
             config_path = getattr(state, "_config_path", None)
             if config_path is None:
                 config_path = Path("server.yaml")
             with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(_config_to_dict(new_cfg), f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-            return RedirectResponse(url="/ui/config?saved=1", status_code=302)
+                yaml.dump(_config_to_dict(payload), f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            return JSONResponse({"success": True})
         except Exception as e:
             logger.exception("Config save failed")
-            return RedirectResponse(url=f"/ui/config?error={str(e)}", status_code=302)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    # ------------------------------------------------------------------
+    # SPA fallback: all /ui/* routes serve index.html
+    # ------------------------------------------------------------------
+    @app.get("/ui/{full_path:path}")
+    async def serve_spa(full_path: str) -> FileResponse:
+        index = dist_dir / "index.html"
+        if not index.exists():
+            raise HTTPException(status_code=404, detail="UI not built")
+        return FileResponse(str(index))
 
 
 # ------------------------------------------------------------------

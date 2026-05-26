@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "light-server"
-version = "0.4.2"
+version = "0.5.0"
 description = "Triton-style CLI and deployment server built on LitServe"
 readme = "README.md"
 license = "MIT"

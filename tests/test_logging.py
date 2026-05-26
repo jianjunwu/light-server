@@ -133,6 +133,98 @@ def test_setup_worker_logging_clears_existing_handlers():
     assert record.getMessage() == "uvicorn_msg"
 
 
+def test_log_consumer_always_outputs_to_console_with_files():
+    """When file outputs are configured, LogConsumer should still output to console."""
+    queue = mp.Queue()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        info_path = str(Path(tmpdir) / "info.log")
+        consumer = LogConsumer(
+            queue=queue,
+            level="INFO",
+            fmt="text",
+            info_output=info_path,
+            rotate_by="none",
+        )
+        consumer.start()
+        import time
+        time.sleep(0.2)
+
+        handler_names = [name for name, _ in consumer._handlers]
+        assert "console" in handler_names
+        assert "info" in handler_names
+        consumer.stop()
+
+
+def test_log_consumer_console_uses_json_format_when_configured():
+    """Console handler should use JSON formatter when fmt='json'."""
+    queue = mp.Queue()
+    consumer = LogConsumer(
+        queue=queue,
+        level="INFO",
+        fmt="json",
+        info_output=None,
+        error_output=None,
+        rotate_by="none",
+    )
+    consumer.start()
+    import time
+    time.sleep(0.2)
+
+    console_handler = next(h for name, h in consumer._handlers if name == "console")
+    from light_server.logging.consumer import _JSONFormatter
+    assert isinstance(console_handler.formatter, _JSONFormatter)
+    consumer.stop()
+
+
+def test_log_consumer_console_uses_text_format_when_configured():
+    """Console handler should use plain text formatter when fmt='text'."""
+    queue = mp.Queue()
+    consumer = LogConsumer(
+        queue=queue,
+        level="INFO",
+        fmt="text",
+        info_output=None,
+        error_output=None,
+        rotate_by="none",
+    )
+    consumer.start()
+    import time
+    time.sleep(0.2)
+
+    console_handler = next(h for name, h in consumer._handlers if name == "console")
+    assert isinstance(console_handler.formatter, logging.Formatter)
+    # Should NOT be JSON formatter
+    from light_server.logging.consumer import _JSONFormatter
+    assert not isinstance(console_handler.formatter, _JSONFormatter)
+    consumer.stop()
+
+
+def test_log_consumer_emits_to_console(capfd):
+    """Records sent to queue should appear on console when consumer is running."""
+    queue = mp.Queue()
+    consumer = LogConsumer(
+        queue=queue,
+        level="INFO",
+        fmt="text",
+        info_output=None,
+        error_output=None,
+        rotate_by="none",
+    )
+    consumer.start()
+    import time
+    time.sleep(0.2)
+
+    record = logging.LogRecord(
+        name="console_test", level=logging.INFO, pathname="", lineno=0, msg="visible_on_console", args=(), exc_info=None
+    )
+    queue.put(record)
+    time.sleep(0.3)
+    consumer.stop()
+
+    captured = capfd.readouterr()
+    assert "visible_on_console" in captured.err
+
+
 def test_setup_worker_logging_fallback_without_queue_uses_configured_format():
     """When log_queue is None, worker should still use the configured format (json or text)."""
     import io

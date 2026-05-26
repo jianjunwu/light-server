@@ -174,7 +174,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             metrics=MetricsConfig(enabled=not (args.no_metrics or False)),
             logging=LoggingConfig(
                 level=args.log_level or "info",
-                format=args.log_format or "json",
+                format=args.log_format or "text",
                 info_output=log_info,
                 error_output=log_error,
                 rotate_by=args.log_rotate_by or "none",

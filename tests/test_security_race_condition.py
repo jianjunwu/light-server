@@ -138,9 +138,14 @@ class TestRaceCondition:
                 try:
                     mgr.infer("test_model", {"x": 1})
                 except Exception as e:
-                    # QueueFullError or RuntimeError are acceptable during unload
-                    from light_server.core.exceptions import QueueFullError
-                    if isinstance(e, QueueFullError):
+                    # During unload the model may be removed or de-activated;
+                    # any of these are acceptable race outcomes.
+                    from light_server.core.exceptions import (
+                        ModelNotFoundError,
+                        ModelNotReadyError,
+                        QueueFullError,
+                    )
+                    if isinstance(e, (QueueFullError, ModelNotFoundError, ModelNotReadyError)):
                         continue
                     if "not ready" in str(e).lower():
                         continue

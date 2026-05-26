@@ -1,9 +1,7 @@
 import { Layout, Menu, Typography } from 'antd'
 import {
   DashboardOutlined,
-  DatabaseOutlined,
   LineChartOutlined,
-  SettingOutlined,
 } from '@ant-design/icons'
 import { Link, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
@@ -12,9 +10,7 @@ const { Header, Sider, Content } = Layout
 
 const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: <Link to="/">Dashboard</Link> },
-  { key: '/repository', icon: <DatabaseOutlined />, label: <Link to="/repository">Repository</Link> },
   { key: '/benchmarks', icon: <LineChartOutlined />, label: <Link to="/benchmarks">Benchmarks</Link> },
-  { key: '/config', icon: <SettingOutlined />, label: <Link to="/config">Config</Link> },
 ]
 
 export default function AppLayout({ children }: { children: ReactNode }) {

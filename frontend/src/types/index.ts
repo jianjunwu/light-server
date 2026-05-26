@@ -70,6 +70,16 @@ export interface ServerConfig {
   transport: string
 }
 
+export interface FeaturesConfig {
+  timeline: boolean
+  system_overview: boolean
+  custom_metrics: boolean
+  benchmarks: boolean
+  playground: boolean
+  alerts: boolean
+  version_compare: boolean
+}
+
 export interface FullConfig {
   server: ServerConfig
   grpc: { enabled: boolean; max_workers: number }
@@ -78,4 +88,5 @@ export interface FullConfig {
   model_repository: Record<string, unknown>
   webui: { enabled: boolean; report_retention_days: number }
   load_models: string[]
+  features: FeaturesConfig
 }

@@ -1,24 +1,64 @@
-import { Card, Tag, Button, Space, Statistic } from 'antd'
-import { ThunderboltOutlined, SwapOutlined } from '@ant-design/icons'
+import { Card, Tag, Button, Space, Statistic, Dropdown } from 'antd'
+import {
+  ThunderboltOutlined,
+  SwapOutlined,
+  EllipsisOutlined,
+  EyeOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons'
 import type { ModelInfo } from '@/types'
 
 interface Props {
   model: ModelInfo
   onLoad: (name: string) => void
   onUnload: (name: string) => void
+  onReload: (name: string) => void
+  onDetail: (name: string) => void
 }
 
-export default function ModelCard({ model, onLoad, onUnload }: Props) {
-  const statusColor =
-    model.status === 'READY' ? 'success' :
-    model.status === 'LOADING' ? 'processing' :
-    'default'
+export default function ModelCard({ model, onLoad, onUnload, onReload, onDetail }: Props) {
+  const isReady = model.status === 'READY'
+  const isLoading = model.status === 'LOADING'
+
+  const statusColor = isReady ? 'success' : isLoading ? 'processing' : 'default'
+  const cardOpacity = isReady ? 1 : 0.7
+
+  const moreItems = [
+    {
+      key: 'detail',
+      icon: <EyeOutlined />,
+      label: 'View Detail',
+      onClick: () => onDetail(model.name),
+    },
+    ...(isReady
+      ? [
+          {
+            key: 'reload',
+            icon: <ReloadOutlined />,
+            label: 'Hot Reload',
+            onClick: () => onReload(model.name),
+          },
+        ]
+      : []),
+  ]
 
   return (
     <Card
-      title={model.name}
-      extra={<Tag color={statusColor}>{model.status}</Tag>}
-      style={{ marginBottom: 16 }}
+      title={
+        <span style={{ cursor: 'pointer' }} onClick={() => onDetail(model.name)}>
+          {model.name}
+        </span>
+      }
+      extra={
+        <Space>
+          <Tag color={statusColor}>{model.status}</Tag>
+          <Dropdown menu={{ items: moreItems }} placement="bottomRight">
+            <Button type="text" icon={<EllipsisOutlined />} size="small" />
+          </Dropdown>
+        </Space>
+      }
+      style={{ marginBottom: 16, opacity: cardOpacity }}
+      bodyStyle={{ padding: '16px 20px' }}
     >
       <Space direction="vertical" style={{ width: '100%' }}>
         <Space>
@@ -33,11 +73,16 @@ export default function ModelCard({ model, onLoad, onUnload }: Props) {
           <Statistic title="Queue" value={model.queue_depth} />
         </Space>
         <Space>
-          {model.status !== 'READY' ? (
-            <Button type="primary" onClick={() => onLoad(model.name)}>Load</Button>
+          {!isReady ? (
+            <Button type="primary" onClick={() => onLoad(model.name)} loading={isLoading}>
+              Load
+            </Button>
           ) : (
-            <Button danger onClick={() => onUnload(model.name)}>Unload</Button>
+            <Button danger onClick={() => onUnload(model.name)}>
+              Unload
+            </Button>
           )}
+          <Button onClick={() => onDetail(model.name)}>Detail</Button>
         </Space>
       </Space>
     </Card>

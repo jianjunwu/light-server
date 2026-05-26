@@ -72,6 +72,8 @@ pip install light-server
 
 需要 Python >= 3.10。
 
+支持平台：Linux AMD64、Linux ARM64（已通过 CI 验证）。macOS 可运行但未经 CI 覆盖。
+
 ### 从源码开发
 
 本项目使用 [uv](https://docs.astral.sh/uv/) 管理依赖：

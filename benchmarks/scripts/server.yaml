@@ -1,0 +1,18 @@
+server:
+  host: 127.0.0.1
+  http_port: 8000
+  log_level: warning
+  http_workers: 1
+
+grpc:
+  enabled: false
+
+metrics:
+  enabled: false
+
+model_repository:
+  path: ./benchmarks/models
+  control_mode: explicit
+
+load_models:
+  - sleep_model

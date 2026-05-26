@@ -47,10 +47,12 @@ def find_pareto_frontier(
             return result.metrics.latency_ms.mean
         return 0.0
 
+    _EPSILON = 1e-9
+
     def _is_better(a: float, b: float, direction: str) -> bool:
         if direction == "maximize":
-            return a > b
-        return a < b
+            return a > b + _EPSILON
+        return a < b - _EPSILON
 
     def _dominates(i: int, j: int) -> bool:
         """Return True if result[i] dominates result[j]."""
@@ -63,7 +65,7 @@ def find_pareto_frontier(
             vj = _get_value(rj, metric)
             if _is_better(vi, vj, direction):
                 better_in_any = True
-            elif vi != vj:
+            elif abs(vi - vj) > _EPSILON:
                 return False
         return better_in_any
 

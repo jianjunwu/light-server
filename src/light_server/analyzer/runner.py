@@ -117,6 +117,7 @@ class AnalysisRunner:
         loaded = mm.load(model_name, version="1", config_override=override)
         if not loaded:
             logger.error(f"Failed to load {model_name} with config {run_cfg}")
+            manager.shutdown()
             return RunResult(
                 config=run_cfg,
                 metrics=BenchmarkResult(failed_requests=1),

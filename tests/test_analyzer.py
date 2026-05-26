@@ -159,6 +159,31 @@ def test_pareto_frontier_multi_objective():
     assert throughputs == {100, 200}
 
 
+def test_pareto_frontier_float_epsilon():
+    """Pareto should treat near-equal floats as equal, not as strict domination."""
+    results = [
+        RunResult(
+            ModelRunConfig(1, 1, 1),
+            BenchmarkResult(throughput=100.0, latency_ms=type("L", (), {"p99": 50.0})()),
+        ),
+        RunResult(
+            ModelRunConfig(2, 1, 2),
+            BenchmarkResult(throughput=100.0 + 1e-10, latency_ms=type("L", (), {"p99": 50.0})()),
+        ),
+    ]
+
+    pareto = find_pareto_frontier(
+        results,
+        objectives=[
+            {"metric": "throughput", "direction": "maximize"},
+            {"metric": "p99_latency", "direction": "minimize"},
+        ],
+    )
+
+    # Both should remain because the throughput difference is below epsilon
+    assert len(pareto) == 2
+
+
 def test_report_generator_console():
     """Console report should contain key data."""
     from datetime import datetime, timezone
@@ -394,3 +419,102 @@ def test_websocket_streaming_target_url():
         model_name="m",
     )
     assert target_no_version.base_url == "wss://example.com"
+
+
+def test_analysis_runner_shuts_down_manager_on_load_failure():
+    """AnalysisRunner should shut down mp.Manager even when model load fails."""
+    from unittest.mock import MagicMock, patch
+
+    from light_server.analyzer.config_space import AnalysisConfig, ModelRunConfig
+    from light_server.analyzer.runner import AnalysisRunner
+
+    runner = AnalysisRunner("/tmp/fake_repo")
+
+    mock_manager = MagicMock()
+
+    with patch("multiprocessing.Manager", return_value=mock_manager):
+        with patch("light_server.analyzer.runner.ModelManager") as MockMM:
+            mock_mm = MagicMock()
+            mock_mm.load.return_value = False
+            MockMM.return_value = mock_mm
+            with patch("light_server.analyzer.runner.ModelRegistry"):
+                with patch(
+                    "light_server.analyzer.runner.create_transport_from_config"
+                ):
+                    result = asyncio.run(
+                        runner._benchmark_config(
+                            "test_model",
+                            ModelRunConfig(1, 1, 1),
+                            AnalysisConfig(
+                                batch_sizes=[1],
+                                workers_per_device=[1],
+                                concurrency_levels=[1],
+                            ),
+                        )
+                    )
+
+    assert result.metrics.failed_requests == 1
+    mock_manager.shutdown.assert_called_once()
+
+
+def test_streaming_benchmark_total_chunks_accumulation():
+    """total_chunks should accumulate each stream's total_chunks, not len(tbt_all) + success."""
+    from light_server.analyzer.benchmark import StreamingBenchmarkEngine
+
+    async def mock_target(payload, num_chunks=3):
+        await asyncio.sleep(0.01)
+        return {
+            "ttft_ms": 5.0,
+            "tbt_values": [2.0, 3.0],
+            "tpot_ms": 10.0,
+            "total_chunks": 7,
+        }
+
+    engine = StreamingBenchmarkEngine()
+    result = asyncio.run(
+        engine.run(
+            target=mock_target,
+            payload={"input": 1.0},
+            mode="fixed",
+            concurrency=1,
+            duration=0.1,
+            warmup_streams=0,
+            num_chunks_per_stream=7,
+        )
+    )
+
+    expected_total = 7 * result.successful_requests
+    assert result.streaming.total_chunks == expected_total
+
+
+def test_streaming_benchmark_passes_num_chunks_to_target():
+    """StreamingBenchmarkEngine should pass num_chunks_per_stream to target."""
+    from light_server.analyzer.benchmark import StreamingBenchmarkEngine
+
+    received_chunks: list[int] = []
+
+    async def mock_target(payload, num_chunks=3):
+        received_chunks.append(num_chunks)
+        await asyncio.sleep(0.01)
+        return {
+            "ttft_ms": 5.0,
+            "tbt_values": [2.0],
+            "tpot_ms": 10.0,
+            "total_chunks": 2,
+        }
+
+    engine = StreamingBenchmarkEngine()
+    asyncio.run(
+        engine.run(
+            target=mock_target,
+            payload={"input": 1.0},
+            mode="fixed",
+            concurrency=1,
+            duration=0.1,
+            warmup_streams=0,
+            num_chunks_per_stream=10,
+        )
+    )
+
+    assert len(received_chunks) > 0
+    assert all(nc == 10 for nc in received_chunks)

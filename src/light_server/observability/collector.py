@@ -93,6 +93,8 @@ class SystemMetrics:
         self._request_start_times: dict[str, float] = {}
         self._stream_first_token_times: dict[str, float] = {}
         self._stream_last_token_times: dict[str, float] = {}
+        self._queue_depth_values: dict[str, int] = {}
+        self._active_workers_values: dict[str, int] = {}
 
         # UI-friendly sliding window data (not Prometheus metrics)
         self._latency_window: deque[tuple[float, float]] = deque(maxlen=2000)
@@ -100,14 +102,14 @@ class SystemMetrics:
         self._last_rate_check: float = time.time()
         self._qps_history: dict[str, deque[tuple[float, float]]] = {}
 
-    def record_request_start(self, model: str, version: str) -> None:
+    def record_request_start(self, model: str, version: str, request_id: str) -> None:
         """Call at request entry."""
-        self._request_start_times[f"{model}_{version}"] = time.time()
+        self._request_start_times[request_id] = time.time()
 
-    def record_request_end(self, model: str, version: str, status: str) -> None:
+    def record_request_end(self, model: str, version: str, status: str, request_id: str) -> None:
         """Call at request exit with HTTP status category."""
         self.requests_total.labels(model=model, version=version, status=status).inc()
-        start = self._request_start_times.pop(f"{model}_{version}", None)
+        start = self._request_start_times.pop(request_id, None)
         if start is not None:
             latency = time.time() - start
             self.request_duration.labels(model=model, version=version).observe(latency)
@@ -118,9 +120,16 @@ class SystemMetrics:
 
     def inc_queue_depth(self, model: str, version: str) -> None:
         self.queue_depth.labels(model=model, version=version).inc()
+        key = f"{model}_{version}"
+        self._queue_depth_values[key] = self._queue_depth_values.get(key, 0) + 1
 
     def dec_queue_depth(self, model: str, version: str) -> None:
         self.queue_depth.labels(model=model, version=version).dec()
+        key = f"{model}_{version}"
+        self._queue_depth_values[key] = max(0, self._queue_depth_values.get(key, 0) - 1)
+
+    def get_queue_depth(self, model: str, version: str) -> int:
+        return self._queue_depth_values.get(f"{model}_{version}", 0)
 
     def record_model_load(self, model: str, version: str, success: bool) -> None:
         status = "success" if success else "fail"
@@ -145,6 +154,10 @@ class SystemMetrics:
 
     def set_active_workers(self, model: str, version: str, count: int) -> None:
         self.active_workers.labels(model=model, version=version).set(count)
+        self._active_workers_values[f"{model}_{version}"] = count
+
+    def get_active_workers(self, model: str, version: str) -> int:
+        return self._active_workers_values.get(f"{model}_{version}", 0)
 
     # ------------------------------------------------------------------
     # Streaming metrics
@@ -164,7 +177,7 @@ class SystemMetrics:
         first_time = self._stream_first_token_times.get(stream_id, 0.0)
         if first_time == 0.0:
             # First chunk: record TTFT relative to request start
-            start = self._request_start_times.pop(f"{model}_{version}", None)
+            start = self._request_start_times.pop(stream_id, None)
             if start is not None:
                 ttft = now - start
                 self.streaming_ttft.labels(model=model, version=version, protocol=protocol).observe(ttft)

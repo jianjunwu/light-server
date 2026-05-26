@@ -33,8 +33,8 @@ def test_callback_initialization():
     cb = PrometheusCallback()
     assert cb.inference_duration is not None
     assert cb.batch_size is not None
-    assert cb.batch_wait_time is not None
     assert cb._inference_start_times == {}
+    assert not hasattr(cb, "batch_wait_time")  # removed unused metric
 
 
 def test_on_server_start_does_not_crash():

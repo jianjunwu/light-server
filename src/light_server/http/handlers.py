@@ -68,7 +68,8 @@ async def _do_infer(state: HTTPState, model_name: str, version: str | None, requ
         validate_version(version)
 
     resolved_version = version or state.registry.get_active_version(model_name) or "unknown"
-    state.system_metrics.record_request_start(model_name, resolved_version)
+    request_id = str(uuid.uuid4())
+    state.system_metrics.record_request_start(model_name, resolved_version, request_id)
 
     status = "2xx"
     try:
@@ -115,7 +116,7 @@ async def _do_infer(state: HTTPState, model_name: str, version: str | None, requ
         status = "5xx"
         raise
     finally:
-        state.system_metrics.record_request_end(model_name, resolved_version, status)
+        state.system_metrics.record_request_end(model_name, resolved_version, status, request_id)
 
 
 async def _do_ensemble_infer(
@@ -224,7 +225,6 @@ async def _do_ws_stream(
     await websocket.accept()
 
     resolved_version = version or state.registry.get_active_version(model_name) or "unknown"
-    state.system_metrics.record_request_start(model_name, resolved_version)
 
     stream_id: str | None = None
     status = "2xx"
@@ -235,6 +235,7 @@ async def _do_ws_stream(
             return
 
         stream_id = f"ws-{uuid.uuid4().hex}"
+        state.system_metrics.record_request_start(model_name, resolved_version, stream_id)
 
         event = asyncio.Event()
         buffer_item = ResponseBufferItem(event=event, response_queue=deque())
@@ -308,7 +309,7 @@ async def _do_ws_stream(
             except Exception:
                 pass
             state.response_buffer.pop(stream_id, None)
-        state.system_metrics.record_request_end(model_name, resolved_version, status)
+        state.system_metrics.record_request_end(model_name, resolved_version, status, stream_id)
 
 
 async def _ws_sender(

@@ -110,9 +110,9 @@ def test_metrics_aggregator_with_requests():
     agg = MetricsAggregator(sm)
 
     # Simulate some requests
-    for _ in range(10):
-        sm.record_request_start("model1", "1")
-        sm.record_request_end("model1", "1", "2xx")
+    for i in range(10):
+        sm.record_request_start("model1", "1", f"req-{i}")
+        sm.record_request_end("model1", "1", "2xx", f"req-{i}")
 
     data = agg.get_model_metrics("model1", "1")
     assert data["qps"] >= 0.0

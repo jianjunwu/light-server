@@ -28,12 +28,6 @@ class PrometheusCallback(Callback):
             ["model"],
             buckets=[1, 2, 4, 8, 16, 32, 64],
         )
-        self.batch_wait_time = Histogram(
-            "lightserver_batch_wait_seconds",
-            "Time spent waiting for batch to fill",
-            ["model"],
-            buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25],
-        )
         self._inference_start_times: dict[str, float] = {}
 
     def on_before_predict(self, *args, **kwargs) -> None:

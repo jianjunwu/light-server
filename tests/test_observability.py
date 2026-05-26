@@ -153,7 +153,7 @@ def test_streaming_metrics_lifecycle():
     assert sm._stream_first_token_times[stream_id] == 0.0
 
     # Simulate request start for TTFT calculation
-    sm.record_request_start(model, version)
+    sm.record_request_start(model, version, stream_id)
 
     # First chunk should record TTFT (not TBT)
     sm.record_stream_chunk(model, version, protocol, stream_id)
@@ -187,7 +187,8 @@ def test_streaming_metrics_multiple_streams():
     assert s1 in sm._stream_first_token_times
     assert s2 in sm._stream_first_token_times
 
-    sm.record_request_start("m", "1")
+    sm.record_request_start("m", "1", s1)
+    sm.record_request_start("m", "1", s2)
     sm.record_stream_chunk("m", "1", "ws", s1)
     sm.record_stream_chunk("m", "1", "ws", s2)
 
@@ -213,3 +214,119 @@ def test_streaming_metrics_without_request_start():
 
     sm.record_stream_close("m", "1", "grpc", stream_id)
     assert stream_id not in sm._stream_first_token_times
+
+
+def test_concurrent_request_start_times():
+    """Concurrent requests with same model/version should not overwrite start times."""
+    registry, _, _ = setup_multiproc_metrics(clean=True)
+    sm = SystemMetrics(registry)
+
+    req1 = "req-1"
+    req2 = "req-2"
+
+    sm.record_request_start("m", "1", req1)
+    sm.record_request_start("m", "1", req2)
+
+    # Both start times should be tracked independently
+    assert req1 in sm._request_start_times
+    assert req2 in sm._request_start_times
+
+    # End req1
+    sm.record_request_end("m", "1", "2xx", req1)
+    assert req1 not in sm._request_start_times
+    assert req2 in sm._request_start_times
+
+    # End req2
+    sm.record_request_end("m", "1", "2xx", req2)
+    assert req2 not in sm._request_start_times
+
+
+def test_streaming_ttft_uses_stream_id():
+    """Stream chunk TTFT should use stream_id, not model+version key."""
+    registry, _, _ = setup_multiproc_metrics(clean=True)
+    sm = SystemMetrics(registry)
+
+    s1 = "stream-a"
+    s2 = "stream-b"
+
+    sm.record_stream_open("m", "1", "ws", s1)
+    sm.record_stream_open("m", "1", "ws", s2)
+
+    sm.record_request_start("m", "1", s1)
+    sm.record_request_start("m", "1", s2)
+
+    # First chunk on s1 should pop s1's start time, not s2's
+    sm.record_stream_chunk("m", "1", "ws", s1)
+    assert s1 in sm._stream_first_token_times
+    assert s1 not in sm._request_start_times  # popped by TTFT
+    assert s2 in sm._request_start_times  # still there
+
+    sm.record_stream_chunk("m", "1", "ws", s2)
+    assert s2 not in sm._request_start_times  # popped by TTFT
+
+    sm.record_stream_close("m", "1", "ws", s1)
+    sm.record_stream_close("m", "1", "ws", s2)
+
+
+def test_metrics_aggregator_uses_public_api():
+    """MetricsAggregator should not access prometheus_client internal _value."""
+    from light_server.webui.metrics_agg import MetricsAggregator
+
+    registry, _, _ = setup_multiproc_metrics(clean=True)
+    sm = SystemMetrics(registry)
+
+    agg = MetricsAggregator(sm)
+
+    sm.inc_queue_depth("m", "1")
+    sm.inc_queue_depth("m", "1")
+    sm.set_active_workers("m", "1", 4)
+
+    metrics = agg.get_model_metrics("m", "1")
+    assert metrics is not None
+    assert metrics["queue_depth"] == 2
+    assert metrics["active_workers"] == 4
+
+
+def test_queue_depth_and_active_workers_getters():
+    """SystemMetrics should track queue_depth and active_workers via public getters."""
+    registry, _, _ = setup_multiproc_metrics(clean=True)
+    sm = SystemMetrics(registry)
+
+    assert sm.get_queue_depth("m", "1") == 0
+    assert sm.get_active_workers("m", "1") == 0
+
+    sm.inc_queue_depth("m", "1")
+    sm.inc_queue_depth("m", "1")
+    assert sm.get_queue_depth("m", "1") == 2
+
+    sm.dec_queue_depth("m", "1")
+    assert sm.get_queue_depth("m", "1") == 1
+
+    sm.set_active_workers("m", "1", 3)
+    assert sm.get_active_workers("m", "1") == 3
+
+    sm.set_active_workers("m", "1", 0)
+    assert sm.get_active_workers("m", "1") == 0
+
+
+def test_init_worker_locals_idempotent():
+    """HTTPState.init_worker_locals should be idempotent (no duplicate registry creation)."""
+    from light_server.http.state import HTTPState
+
+    state = HTTPState(
+        registry=None,  # type: ignore[arg-type]
+        transport=None,  # type: ignore[arg-type]
+        config=None,  # type: ignore[arg-type]
+    )
+
+    state.init_worker_locals()
+    first_metrics = state._system_metrics
+    first_buffer = state._shm_buffer
+
+    assert first_metrics is not None
+    assert first_buffer is not None
+
+    # Second call should not recreate
+    state.init_worker_locals()
+    assert state._system_metrics is first_metrics
+    assert state._shm_buffer is first_buffer

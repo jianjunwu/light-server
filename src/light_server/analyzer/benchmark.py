@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import statistics
 import time
@@ -369,6 +370,21 @@ class StreamingBenchmarkEngine:
             target, payload, concurrency, max_concurrency, step_duration, duration, num_chunks_per_stream
         )
 
+    @staticmethod
+    def _target_accepts_num_chunks(target: Callable[..., Awaitable[Any]]) -> bool:
+        sig = inspect.signature(target)
+        return "num_chunks" in sig.parameters
+
+    async def _invoke_target(
+        self,
+        target: Callable[..., Awaitable[Any]],
+        payload: dict[str, Any],
+        num_chunks: int,
+    ) -> Any:
+        if self._target_accepts_num_chunks(target):
+            return await target(payload, num_chunks=num_chunks)
+        return await target(payload)
+
     async def _run_fixed(
         self,
         target: Callable[[dict[str, Any]], Awaitable[Any]],
@@ -380,6 +396,7 @@ class StreamingBenchmarkEngine:
         ttft_values: list[float] = []
         tbt_all: list[float] = []
         tpot_values: list[float] = []
+        total_chunks_list: list[int] = []
         errors: list[str] = []
         success_count = 0
         fail_count = 0
@@ -389,15 +406,17 @@ class StreamingBenchmarkEngine:
             nonlocal success_count, fail_count
             while not stop_event.is_set():
                 try:
-                    result = await target(payload)
+                    result = await self._invoke_target(target, payload, num_chunks)
                     ttft_values.append(result.get("ttft_ms", 0.0))
                     tbt_all.extend(result.get("tbt_values", []))
                     tpot_values.append(result.get("tpot_ms", 0.0))
+                    total_chunks_list.append(result.get("total_chunks", 0))
                     success_count += 1
                 except Exception as e:
                     fail_count += 1
                     if len(errors) < 10:
                         errors.append(str(e))
+                    await asyncio.sleep(0)
 
         tasks = [asyncio.create_task(worker()) for _ in range(concurrency)]
         await asyncio.sleep(duration)
@@ -405,7 +424,7 @@ class StreamingBenchmarkEngine:
         await asyncio.gather(*tasks, return_exceptions=True)
 
         return self._build_streaming_result(
-            ttft_values, tbt_all, tpot_values, success_count, fail_count, duration, errors
+            ttft_values, tbt_all, tpot_values, total_chunks_list, success_count, fail_count, duration, errors
         )
 
     async def _run_ramp(
@@ -421,6 +440,7 @@ class StreamingBenchmarkEngine:
         ttft_values: list[float] = []
         tbt_all: list[float] = []
         tpot_values: list[float] = []
+        total_chunks_list: list[int] = []
         errors: list[str] = []
         success_count = 0
         fail_count = 0
@@ -432,17 +452,19 @@ class StreamingBenchmarkEngine:
             nonlocal success_count, fail_count
             while not stop_event.is_set():
                 try:
-                    result = await target(payload)
+                    result = await self._invoke_target(target, payload, num_chunks)
                     async with lock:
                         ttft_values.append(result.get("ttft_ms", 0.0))
                         tbt_all.extend(result.get("tbt_values", []))
                         tpot_values.append(result.get("tpot_ms", 0.0))
+                        total_chunks_list.append(result.get("total_chunks", 0))
                         success_count += 1
                 except Exception as e:
                     async with lock:
                         fail_count += 1
                         if len(errors) < 10:
                             errors.append(str(e))
+                    await asyncio.sleep(0)
 
         tasks: list[asyncio.Task] = []
         start_time = time.perf_counter()
@@ -464,7 +486,7 @@ class StreamingBenchmarkEngine:
         actual_duration = time.perf_counter() - start_time
 
         return self._build_streaming_result(
-            ttft_values, tbt_all, tpot_values, success_count, fail_count, actual_duration, errors
+            ttft_values, tbt_all, tpot_values, total_chunks_list, success_count, fail_count, actual_duration, errors
         )
 
     def _build_streaming_result(
@@ -472,6 +494,7 @@ class StreamingBenchmarkEngine:
         ttft_values: list[float],
         tbt_all: list[float],
         tpot_values: list[float],
+        total_chunks_list: list[int],
         success: int,
         failed: int,
         duration: float,
@@ -500,7 +523,7 @@ class StreamingBenchmarkEngine:
                     max=round(sorted_tbt[-1], 3) if sorted_tbt else 0.0,
                 ),
                 tpot_ms=round(statistics.mean(tpot_values), 3) if tpot_values else 0.0,
-                total_chunks=sum(len(tbt_all) + success for _ in range(1)) if tbt_all else 0,
+                total_chunks=sum(total_chunks_list),
                 total_streams=success,
                 failed_streams=failed,
             ),

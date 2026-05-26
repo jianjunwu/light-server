@@ -98,6 +98,9 @@ class HTTPState:
 
     def init_worker_locals(self) -> None:
         """Create process-local resources (metrics, SHM buffer)."""
+        if self._system_metrics is not None:
+            return
+
         from light_server.core.shm_buffer import ShmPayloadBuffer
         from light_server.observability import setup_multiproc_metrics, SystemMetrics
 

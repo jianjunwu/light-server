@@ -53,17 +53,11 @@ class MetricsAggregator:
             p99 = round(sorted_samples[int(n * 0.99)], 3) if n > 0 else 0.0
             avg = round(sum(samples) / len(samples), 3)
 
-        # Queue depth from Prometheus Gauge
-        try:
-            queue_val = self._system_metrics.queue_depth.labels(model=model, version=version)._value.get()
-        except Exception:
-            queue_val = 0.0
+        # Queue depth from internal tracker
+        queue_val = self._system_metrics.get_queue_depth(model, version)
 
-        # Active workers
-        try:
-            workers_val = self._system_metrics.active_workers.labels(model=model, version=version)._value.get()
-        except Exception:
-            workers_val = 0.0
+        # Active workers from internal tracker
+        workers_val = self._system_metrics.get_active_workers(model, version)
 
         # QPS history for sparkline
         history = self._system_metrics.get_qps_history(model, version)

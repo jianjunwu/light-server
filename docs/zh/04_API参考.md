@@ -31,7 +31,7 @@ ok
 ```json
 {
   "server": "light-server",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "loaded_models": [...]
 }
 ```
@@ -81,9 +81,9 @@ Content-Type: application/json
 
 #### WebSocket `/v2/models/{model_name}/stream`
 
-对模型的**当前激活版本**建立双向 WebSocket 流式推理连接。
+对模型的**当前激活版本**建立 WebSocket 流式推理连接。服务端逐 chunk 向客户端返回推理结果。
 
-客户端通过 WebSocket 发送 JSON 消息，服务端逐 chunk 返回推理结果。
+> 如需真正的双向流式（客户端和服务端可来回发送多条消息），请在 `config.yaml` 中设置 `bidirectional: true`。`stream: true` 仅表示服务端向客户端的单向流式输出。
 
 **消息格式（客户端 -> 服务端）：**
 
@@ -174,14 +174,22 @@ Content-Type: application/json
 **响应：**
 
 ```json
-{
-  "models": [
-    {
-      "name": "echo_model",
-      "versions": ["1", "2"]
-    }
-  ]
-}
+[
+  {
+    "name": "echo_model",
+    "version": "1",
+    "path": "model_repo/echo_model/1",
+    "has_config": true,
+    "type": "litapi"
+  },
+  {
+    "name": "echo_model",
+    "version": "2",
+    "path": "model_repo/echo_model/2",
+    "has_config": true,
+    "type": "litapi"
+  }
+]
 ```
 
 #### POST `/v2/repository/models/{model_name}/load`

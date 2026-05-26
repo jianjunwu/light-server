@@ -14,7 +14,7 @@ graph TB
         Transport[MPQueueTransport<br/>Worker → HTTP Response]
     end
 
-    subgraph "HTTP Process (Uvicorn workers=1)"
+    subgraph "HTTP Process (Uvicorn workers=1 or multi-process)"
         FA[FastAPI App]
         HC[HTTP Handlers<br/>/v2/models/{name}/infer]
         AC[Admin APIs<br/>/v2/models, /v2/repository/*]
@@ -53,7 +53,7 @@ graph TB
 | Process | Count | Responsibility |
 |---------|-------|----------------|
 | Main Process | 1 | Create shared state, start HTTP/gRPC servers, manage model lifecycle |
-| HTTP Process | 1 | Handle HTTP requests (`uvicorn workers=1` ensures access to shared state) |
+| HTTP Process | 1 or more | Handle HTTP requests. Default is `uvicorn workers=1` for shared state access; set `http_workers` to enable multi-process mode |
 | Worker Processes | N | Execute actual inference (each model has its own worker group) |
 
 ---
@@ -158,7 +158,7 @@ This ensures:
 |-----------|------|---------|
 | `ModelRegistry` | `mp.Manager().dict()` | Cross-process model loading state |
 | `Request Queue` | `mp.Manager().Queue()` | Per-model, HTTP → Worker |
-| `Response Buffer` | `dict[uid, asyncio.Event]` | Within HTTP process, wait for worker response |
+| `Response Buffer` | `TTLResponseBuffer` | Within HTTP process, waits for worker response with TTL expiration and max size limits to prevent memory leaks |
 | `MPQueueTransport` | LitServe component | Worker → HTTP response transport |
 
 ---

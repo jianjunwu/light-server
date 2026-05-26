@@ -9,6 +9,7 @@ from typing import Any, Callable
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
+from light_server import __version__
 from light_server.core.exceptions import LightServerError
 from light_server.core.response import error_response
 from light_server.http.state import HTTPState
@@ -31,7 +32,7 @@ async def fallback_exception_handler(request: Request, exc: Exception) -> JSONRe
 
 
 def create_app(state: HTTPState, shutdown_callback: Callable[[], None] | None = None) -> FastAPI:
-    app = FastAPI(title="Light Server", version="0.1.0")
+    app = FastAPI(title="Light Server", version=__version__)
 
     app.add_exception_handler(LightServerError, lightserver_exception_handler)
     app.add_exception_handler(Exception, fallback_exception_handler)
@@ -70,7 +71,7 @@ def create_app(state: HTTPState, shutdown_callback: Callable[[], None] | None = 
     async def info() -> JSONResponse:
         return JSONResponse({
             "server": "light-server",
-            "version": "0.1.0",
+            "version": __version__,
             "loaded_models": state.registry.list_loaded(),
         })
 

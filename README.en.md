@@ -258,15 +258,18 @@ Each version's `config.yaml` supports the following fields:
 | `max_batch_size` | int | `1` | Max batch size; `1` disables batching |
 | `batch_timeout` | float | `0.0` | Batching timeout in seconds; `0.0` means no timeout |
 | `stream` | bool | `false` | Enable streaming responses |
+| `bidirectional` | bool | `false` | Enable bidirectional streaming (WebSocket back-and-forth) |
 | `continuous_batching` | bool | `false` | Enable Continuous Batching (LLM token-by-token generation) |
 | `max_sequence_length` | int | — | Max sequence length for Continuous Batching |
 | `workers_per_device` | int | `1` | Workers per device |
+| `max_queue_size` | int | `1000` | Per-worker request queue capacity limit |
 | `timeout` | float | `30.0` | Per-request timeout in seconds |
 | `accelerator` | str | `auto` | Accelerator: `auto` / `cpu` / `gpu` / `mps` |
+| `devices` | int/str | — | Model-level device override; takes priority over global `server.devices` |
 
 ### Key Rules
 
-- **`model.py` requirement**: Each `model.py` must contain exactly one `LitAPI` subclass. The server dynamically imports and loads it automatically.
+- **`model.py` requirement**: Each `model.py` must contain at least one `LitAPI` subclass. The server dynamically imports and loads the first one found automatically.
 - **Version naming**: Version directory names must be numeric strings (e.g. `1`, `2`). Non-numeric names like `v1` are not supported. The largest numeric version is loaded by default.
 - **Config scope**: `config.yaml` is **version-level** configuration. Different versions of the same model can have independent batch sizes, timeouts, accelerators, etc.
 - **Quick scaffold**: Use `light-server init my_project` to automatically generate a model repository that follows this layout with default config.
@@ -284,7 +287,7 @@ See `server.yaml` for a full example. Key sections:
 - `logging`: log mode, format, output path, rotation policy
 - `webui`: built-in web interface settings
 
-For a full field reference, see [Configuration Details](docs/en/02_configuration_details.md).
+For a full field reference, see [Configuration Details](docs/en/02_configuration.md).
 
 ## Documentation
 
@@ -292,11 +295,11 @@ Detailed documentation is in the [`docs/en/`](docs/en/) directory:
 
 | Document | Content |
 |----------|---------|
-| [Quick Start](docs/en/01_quick_start.md) | Installation + 3-minute getting started |
-| [Configuration Details](docs/en/02_configuration_details.md) | Full field reference + priority rules |
-| [Model Development Guide](docs/en/03_model_development_guide.md) | LitAPI lifecycle + batching/streaming/metrics/versioning |
+| [Quick Start](docs/en/01_getting_started.md) | Installation + 3-minute getting started |
+| [Configuration Details](docs/en/02_configuration.md) | Full field reference + priority rules |
+| [Model Development Guide](docs/en/03_model_development.md) | LitAPI lifecycle + batching/streaming/metrics/versioning |
 | [API Reference](docs/en/04_api_reference.md) | HTTP/gRPC endpoints + status codes |
-| [CLI Command Reference](docs/en/05_cli_command_reference.md) | Full arguments for 7 subcommands |
+| [CLI Command Reference](docs/en/05_cli_reference.md) | Full arguments for 7 subcommands |
 | [Operations Guide](docs/en/06_operations_guide.md) | Prometheus + logging + artifact packaging + analyzer + WebUI |
 | [Architecture Design](docs/en/07_architecture_design.md) | Process model + request flow + Mermaid diagrams |
 | [FAQ](docs/en/08_faq.md) | Common questions and performance tuning |

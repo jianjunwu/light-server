@@ -20,6 +20,8 @@ server:
   timeout: 30.0
   log_level: "info"
   num_api_servers: 1
+  http_workers: null       # null = auto (max(1, cpu_count() - 1))
+  transport: "mp"          # "mp" or "zmq"
 
 grpc:
   enabled: true
@@ -32,10 +34,10 @@ logging:
   mode: "queue"
   level: "info"
   format: "json"
-  output: null
+  output: null          # Unused: the server uses info_output/error_output instead
   info_output: null
   error_output: null
-  rotation: "daily"
+  rotation: "daily"      # Unused: the server uses rotate_by instead
   rotate_by: "none"
   max_size: 100
   when: "midnight"
@@ -70,7 +72,9 @@ webui:
 | `workers_per_device` | int | `1` | Worker processes per device |
 | `timeout` | float | `30.0` | Request timeout in seconds |
 | `log_level` | str | `info` | Log level: `debug`/`info`/`warning`/`error` |
-| `num_api_servers` | int | `1` | HTTP API server processes, keep 1 for shared state |
+| `num_api_servers` | int | `1` | Deprecated: use `http_workers` instead |
+| `http_workers` | int | `null` | Number of HTTP worker processes; `null` = auto (`max(1, cpu_count() - 1)`) |
+| `transport` | str | `"mp"` | Inter-process transport: `"mp"` (multiprocessing queue) or `"zmq"` (ZeroMQ) |
 
 #### `model_repository`
 
@@ -97,8 +101,11 @@ api_path: /predict
 max_batch_size: 4
 batch_timeout: 0.01
 stream: false
+bidirectional: false
 accelerator: cpu
+devices: 1
 workers_per_device: 2
+max_queue_size: 1000
 ```
 
 ### Priority Rules
@@ -107,7 +114,8 @@ When the same field is defined in multiple places, priority from high to low:
 
 1. **Version-level `config.yaml`** (highest priority)
 2. **Model-level `model_config.yaml`** — loading policy and version strategy
-3. **Global `server.yaml` `server` field** (defaults)
+3. **Global `server.yaml` `models` field** — per-model overrides
+4. **Global `server.yaml` `server` field** (defaults)
 
 > See [Model Management](09_model_management.md) for details on `model_config.yaml`, version policies, and ensemble pipelines.
 

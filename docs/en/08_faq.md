@@ -41,7 +41,7 @@ Or change the port in `server.yaml`.
 
 ### Q: Can multiple models share GPU memory?
 
-**Answer**: Yes. Weights loaded in `setup(self, device)` are shared within the same process among multiple workers (via intra-process sharing). However, different models use independent worker process groups, so memory is not shared across models. To share, put related models in the same `model.py` and expose them via different `api_path`s.
+**Answer**: Weights loaded in `setup(self, device)` are shared among workers only when they run within the same process. By default, each model spawns independent worker processes via `mp.spawn`, so memory is not shared across workers or models. To share weights, put related models in the same `model.py` and expose them via different `api_path`s.
 
 ---
 

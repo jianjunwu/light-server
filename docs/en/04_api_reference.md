@@ -31,7 +31,7 @@ Get basic server information.
 ```json
 {
   "server": "light-server",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "loaded_models": [...]
 }
 ```
@@ -81,9 +81,9 @@ Parameters and response are the same as above. The `version` in the path is the 
 
 #### WebSocket `/v2/models/{model_name}/stream`
 
-Open a bidirectional WebSocket streaming inference connection to the **currently active version** of a model.
+Open a WebSocket streaming inference connection to the **currently active version** of a model. The server streams inference results chunk by chunk to the client.
 
-The client sends JSON messages, and the server returns inference results chunk by chunk.
+> For true bidirectional streaming (client and server can send multiple messages back and forth), set `bidirectional: true` in `config.yaml`.
 
 **Message format (client -> server):**
 
@@ -174,14 +174,22 @@ List all available models in the repository (including unloaded ones).
 **Response:**
 
 ```json
-{
-  "models": [
-    {
-      "name": "echo_model",
-      "versions": ["1", "2"]
-    }
-  ]
-}
+[
+  {
+    "name": "echo_model",
+    "version": "1",
+    "path": "model_repo/echo_model/1",
+    "has_config": true,
+    "type": "litapi"
+  },
+  {
+    "name": "echo_model",
+    "version": "2",
+    "path": "model_repo/echo_model/2",
+    "has_config": true,
+    "type": "litapi"
+  }
+]
 ```
 
 #### POST `/v2/repository/models/{model_name}/load`

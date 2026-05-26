@@ -167,3 +167,5 @@ Each example includes a `run.sh` one-shot script and `test_model.py` for standal
 
 - [Configuration Guide](02_configuration.md)
 - [Model Development Guide](03_model_development.md)
+- [API Reference](04_api_reference.md)
+- [Model Development Guide](03_model_development.md)

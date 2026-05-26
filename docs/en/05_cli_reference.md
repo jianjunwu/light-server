@@ -36,6 +36,8 @@ light-server serve --config server.yaml
 light-server serve my_module:MyAPI --port 8000
 ```
 
+> **Note:** Inline mode implicitly sets `control_mode` to `all`, which loads all available models from the repository. To load only specific models, use a config file with `control_mode: explicit` and `load_models`.
+
 ### Arguments
 
 | Argument | Type | Default | Description |
@@ -60,6 +62,7 @@ light-server serve my_module:MyAPI --port 8000
 | `--model-repo` | str | `./model_repo` | Model repository path |
 | `--grpc-port` | int | `8001` | gRPC port |
 | `--metrics-port` | int | `8002` | Metrics port |
+| `--http-workers` | int | `auto` | Number of HTTP worker processes (`auto` = `max(1, cpu_count() - 1)`) |
 | `--no-grpc` | flag | — | Disable gRPC |
 | `--no-metrics` | flag | — | Disable metrics |
 

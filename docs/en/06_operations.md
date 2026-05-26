@@ -105,6 +105,8 @@ Output: `artifacts/test_model-1.0.0-{build_id}.lma`
 - `manifest.json`: Metadata (name, version, build ID, file list, hashes)
 - Model files
 
+> **Runtime loading:** The server automatically scans `.lma` files in the model repository at startup (via `_scan_artifact_models`). You can place `.lma` artifacts directly in `model_repo/` without unpacking — the server extracts them to a cache and loads them like regular models.
+
 ### Signing (Optional)
 
 ```bash

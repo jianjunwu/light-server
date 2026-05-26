@@ -37,7 +37,7 @@ model_repo/
 ```
 
 - `model_name`: Directory name, used as identifier in admin APIs and inference endpoints
-- `version`: Version string (e.g. `1`, `2`, `v1.0`), supports multiple versions side-by-side
+- `version`: Version string (e.g. `1`, `2`), supports multiple versions side-by-side
 - `model.py`: Must contain a class that inherits from `LitAPI`
 
 ## LitAPI Lifecycle
@@ -189,6 +189,19 @@ hot_reload_patterns:
 ```
 
 After modifying `model.py` or `config.yaml`, the model is automatically reloaded without restarting the server.
+
+#### Custom Reload Hook
+
+You can optionally implement `on_file_changed(changed_files)` in your LitAPI subclass to handle reload events customly:
+
+```python
+def on_file_changed(self, changed_files):
+    """Called when hot reload detects file changes."""
+    for path in changed_files:
+        print(f"File changed: {path}")
+    # Return True to proceed with standard reload, False to skip
+    return True
+```
 
 ## Model Lifecycle Hooks
 

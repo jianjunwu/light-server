@@ -36,6 +36,8 @@ light-server serve --config server.yaml
 light-server serve my_module:MyAPI --port 8000
 ```
 
+> **注意：** 内联模式隐式将 `control_mode` 设为 `all`，即加载仓库中所有可用模型。如仅需加载指定模型，请使用配置文件并将 `control_mode` 设为 `explicit` 配合 `load_models` 列表。
+
 ### 参数
 
 | 参数 | 类型 | 默认值 | 说明 |
@@ -60,6 +62,7 @@ light-server serve my_module:MyAPI --port 8000
 | `--model-repo` | str | `./model_repo` | 模型仓库路径 |
 | `--grpc-port` | int | `8001` | gRPC 端口 |
 | `--metrics-port` | int | `8002` | 指标端口 |
+| `--http-workers` | int | `auto` | HTTP 工作进程数（`auto` = `max(1, cpu_count() - 1)`） |
 | `--no-grpc` | flag | — | 禁用 gRPC |
 | `--no-metrics` | flag | — | 禁用指标 |
 

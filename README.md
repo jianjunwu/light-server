@@ -260,15 +260,18 @@ model_repo/
 | `max_batch_size` | int | `1` | 最大批大小，`1` 表示关闭批处理 |
 | `batch_timeout` | float | `0.0` | 批处理超时（秒），`0.0` 表示无超时 |
 | `stream` | bool | `false` | 是否启用流式响应 |
+| `bidirectional` | bool | `false` | 是否启用双向流式（WebSocket 来回交互） |
 | `continuous_batching` | bool | `false` | 是否启用 Continuous Batching（LLM 逐 token 生成） |
 | `max_sequence_length` | int | — | Continuous Batching 时的最大序列长度 |
 | `workers_per_device` | int | `1` | 每设备工作进程数 |
+| `max_queue_size` | int | `1000` | 每 worker 请求队列容量上限 |
 | `timeout` | float | `30.0` | 单请求超时（秒） |
 | `accelerator` | str | `auto` | 加速器：`auto` / `cpu` / `gpu` / `mps` |
+| `devices` | int/str | — | 模型级设备覆盖，优先级高于全局 `server.devices` |
 
 ### 关键规则
 
-- **`model.py` 要求**：每个 `model.py` 中必须有且仅有一个 `LitAPI` 子类，服务器通过动态导入自动识别并加载。
+- **`model.py` 要求**：每个 `model.py` 中必须包含至少一个 `LitAPI` 子类，服务器通过动态导入自动识别并加载第一个找到的。
 - **版本号格式**：版本目录名必须是数字字符串（如 `1`、`2`），不支持 `v1` 等非纯数字格式。加载时默认使用数字最大的版本（即最新版本）。
 - **配置作用域**：`config.yaml` 是**版本级**配置，同一模型的不同版本可拥有独立的批大小、超时、加速器等配置。
 - **快速生成**：使用 `light-server init my_project` 可自动生成符合上述标准的模型仓库结构和默认配置。

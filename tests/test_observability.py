@@ -15,7 +15,7 @@ from litserve.transport.factory import TransportConfig, create_transport_from_co
 
 def test_setup_multiproc_metrics():
     """Multiprocess metrics setup should return a valid registry and directory."""
-    registry, metrics_dir = setup_multiproc_metrics(clean=True)
+    registry, metrics_dir, _ = setup_multiproc_metrics(clean=True)
     assert metrics_dir is not None
     import os
     assert os.environ.get("PROMETHEUS_MULTIPROC_DIR") == metrics_dir
@@ -24,7 +24,7 @@ def test_setup_multiproc_metrics():
 
 def test_system_metrics_creation():
     """SystemMetrics should initialize without errors."""
-    registry, _ = setup_multiproc_metrics(clean=True)
+    registry, _, _ = setup_multiproc_metrics(clean=True)
     sm = SystemMetrics(registry)
     assert sm.requests_total is not None
     assert sm.request_duration is not None
@@ -44,7 +44,7 @@ def test_model_load_metrics(isolated_model_repo):
     transport_config.manager = manager
     transport = create_transport_from_config(transport_config)
 
-    metrics_registry, _ = setup_multiproc_metrics(clean=True)
+    metrics_registry, _, _ = setup_multiproc_metrics(clean=True)
     system_metrics = SystemMetrics(metrics_registry)
 
     mm = ModelManager(isolated_model_repo, registry, transport=transport, system_metrics=system_metrics)
@@ -133,7 +133,7 @@ def test_ensemble_metrics_graceful_without_system_metrics():
 
 def test_streaming_metrics_lifecycle():
     """Streaming metrics should track open/chunk/close lifecycle correctly."""
-    registry, _ = setup_multiproc_metrics(clean=True)
+    registry, _, _ = setup_multiproc_metrics(clean=True)
     sm = SystemMetrics(registry)
 
     # Verify streaming metrics exist
@@ -175,7 +175,7 @@ def test_streaming_metrics_lifecycle():
 
 def test_streaming_metrics_multiple_streams():
     """Multiple concurrent streams should be tracked independently."""
-    registry, _ = setup_multiproc_metrics(clean=True)
+    registry, _, _ = setup_multiproc_metrics(clean=True)
     sm = SystemMetrics(registry)
 
     s1 = "stream-1"
@@ -201,7 +201,7 @@ def test_streaming_metrics_multiple_streams():
 
 def test_streaming_metrics_without_request_start():
     """Stream chunk without prior request_start should not crash TTFT recording."""
-    registry, _ = setup_multiproc_metrics(clean=True)
+    registry, _, _ = setup_multiproc_metrics(clean=True)
     sm = SystemMetrics(registry)
 
     stream_id = "orphan-stream"

@@ -19,7 +19,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run light_server benchmark target")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--workers", type=int, default=1, help="Inference workers per device")
-    parser.add_argument("--http-workers", type=int, default=1, help="HTTP worker processes")
+    parser.add_argument("--http-workers", type=int, default=None, help="HTTP worker processes (default=same as --workers)")
     parser.add_argument(
         "--model-repo",
         default=None,
@@ -29,6 +29,8 @@ def main() -> int:
         "--duration", type=float, default=30.0, help="Expected benchmark duration (for timeout)"
     )
     args = parser.parse_args()
+
+    http_workers = args.http_workers if args.http_workers is not None else args.workers
 
     if args.model_repo:
         model_repo = Path(args.model_repo).resolve()
@@ -52,7 +54,7 @@ def main() -> int:
             log_level="info",
             timeout=args.duration + 10.0,
             workers_per_device=args.workers,
-            http_workers=args.http_workers,
+            http_workers=http_workers,
         ),
         grpc=GrpcConfig(enabled=False),
         metrics=MetricsConfig(enabled=False),

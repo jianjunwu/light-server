@@ -145,7 +145,7 @@ def main() -> int:
 
     print(f"LitServe starting on port {args.port} with {args.workers} workers...")
     try:
-        server.run(port=args.port, log_level="warning")
+        server.run(port=args.port, log_level="warning", generate_client_file=False)
     except KeyboardInterrupt:
         print("\nShutting down LitServe...")
     return 0

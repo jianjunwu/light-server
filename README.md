@@ -40,6 +40,18 @@ graph LR
 
 **light-server 的核心价值**：如果你需要一个能同时服务多个模型（不限于 LLM）、支持热更新、有监控指标、又能快速上手的推理服务器，light-server 是比 Triton 更轻、比 vLLM 更通用的选择。它在 [LitServe](https://github.com/Lightning-AI/litserve) 之上增加了模型仓库管理、多协议服务和运维能力。
 
+## 性能对比
+
+与上游 LitServe 的压测对比（HTTP workers 与推理 workers 对齐，10ms CPU mock 模型）：
+
+| 推理 workers | 并发 | light_server RPS | LitServe RPS | 倍数 |
+|-------------|------|------------------|-------------|------|
+| 1 | 64 | 76.0 | 77.1 | ~1x |
+| 2 | 64 | 162.3 | 77.2 | **2.10x** |
+| 4 | 64 | 156.8 | 76.8 | **2.04x** |
+
+单 worker 时两者基本持平；多 worker 时 light_server 线性扩展，而 LitServe 几乎无扩展。完整数据见 [`benchmarks/`](benchmarks/)。
+
 ## 特性
 
 - **多协议服务**：HTTP REST、gRPC 和 Prometheus 指标分别监听不同端口，WebSocket 支持双向流式推理

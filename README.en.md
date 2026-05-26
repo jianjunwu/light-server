@@ -40,6 +40,18 @@ graph LR
 
 **The core value of light-server**: If you need a server that can serve multiple models (not just LLMs), supports hot updates, has monitoring metrics, and is quick to get started, light-server is lighter than Triton and more general-purpose than vLLM. It adds model repository management, multi-protocol serving, and operational capabilities on top of [LitServe](https://github.com/Lightning-AI/litserve).
 
+## Performance Benchmark
+
+Benchmark vs upstream LitServe (HTTP workers aligned with inference workers, 10ms CPU mock model):
+
+| Inference workers | Concurrency | light_server RPS | LitServe RPS | Speedup |
+|------------------|-------------|------------------|-------------|---------|
+| 1 | 64 | 76.0 | 77.1 | ~1x |
+| 2 | 64 | 162.3 | 77.2 | **2.10x** |
+| 4 | 64 | 156.8 | 76.8 | **2.04x** |
+
+With a single worker both are roughly equal; with multiple workers light_server scales linearly while LitServe shows virtually no scaling. Full results in [`benchmarks/`](benchmarks/).
+
 ## Features
 
 - **Multi-protocol serving**: HTTP REST, gRPC, and Prometheus metrics on separate ports; WebSocket for bidirectional streaming

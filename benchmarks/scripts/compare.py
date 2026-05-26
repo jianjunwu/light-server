@@ -279,6 +279,8 @@ def main() -> int:
                     "8000",
                     "--workers",
                     str(workers),
+                    "--http-workers",
+                    str(workers),
                     "--duration",
                     str(args.duration + 10),
                     *model_repo_arg,

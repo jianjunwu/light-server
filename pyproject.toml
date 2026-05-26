@@ -81,6 +81,10 @@ only-include = ["src/light_server"]
 [tool.hatch.build.hooks.custom]
 path = "scripts/build_frontend.py"
 
+[tool.uv.workspace]
+members = ["."]
+exclude = ["frontend"]
+
 [tool.pytest.ini_options]
 addopts = "-n auto"
 

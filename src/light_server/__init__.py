@@ -19,7 +19,7 @@ from light_server.core.server import LightServer
 try:
     __version__ = importlib.metadata.version("light-server")
 except importlib.metadata.PackageNotFoundError:
-    __version__ = "0.4.0"
+    __version__ = "0.4.2"
 
 __all__ = [
     "LitAPI",

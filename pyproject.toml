@@ -71,8 +71,15 @@ Issues = "https://github.com/jianjunwu/light-server/issues"
 [project.scripts]
 light-server = "light_server.__main__:main"
 
+[tool.hatch.build.targets.sdist]
+only-include = ["src/light_server", "scripts/build_frontend.py", "pyproject.toml", "README.md", "LICENSE"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/light_server"]
+only-include = ["src/light_server"]
+
+[tool.hatch.build.hooks.custom]
+path = "scripts/build_frontend.py"
 
 [tool.pytest.ini_options]
 addopts = "-n auto"

@@ -222,3 +222,8 @@ CLAUDE.md
 
 # Model repository (populated at runtime, examples live elsewhere)
 ./model_repo/
+
+# Frontend build artifacts (generated at build time)
+frontend/dist/
+frontend/node_modules/
+src/light_server/webui/static/dist/

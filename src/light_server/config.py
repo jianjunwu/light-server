@@ -41,7 +41,7 @@ class MetricsConfig:
 class LoggingConfig:
     mode: str = "queue"
     level: str = "info"
-    format: str = "json"
+    format: str = "text"
     output: str | None = None
     info_output: str | None = None
     error_output: str | None = None

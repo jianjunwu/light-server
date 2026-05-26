@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import sys
 from typing import Any
 
 import uvicorn
@@ -32,6 +33,18 @@ def http_worker_main(
         shutdown_event: Optional ``mp.Event`` or ``threading.Event``
             that signals the worker to exit gracefully.
     """
+    # Set up logging in the worker process
+    if state.log_queue is not None:
+        from light_server.logging.queue_handler import setup_worker_logging
+
+        setup_worker_logging(state.log_queue, level=state.config.logging.level)
+    else:
+        root = logging.getLogger()
+        root.setLevel(getattr(logging, state.config.server.log_level.upper(), logging.INFO))
+        if not root.handlers:
+            handler = logging.StreamHandler(sys.stdout)
+            root.addHandler(handler)
+
     # Initialise per-process resources (metrics, SHM buffer, hook cache)
     state.init_worker_locals()
 

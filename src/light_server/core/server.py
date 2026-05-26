@@ -124,7 +124,24 @@ class LightServer:
 
     def _setup_logging(self) -> None:
         log_cfg = self.config.logging
+        root = logging.getLogger()
+        root.setLevel(getattr(logging, log_cfg.level.upper(), logging.INFO))
+
         if not log_cfg.info_output and not log_cfg.error_output:
+            # No file outputs configured — log to console
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setLevel(root.level)
+            if log_cfg.format == "json":
+                from light_server.logging.consumer import _JSONFormatter
+
+                handler.setFormatter(_JSONFormatter())
+            else:
+                handler.setFormatter(
+                    logging.Formatter(
+                        "%(asctime)s - %(processName)s[%(process)d] - %(name)s - %(levelname)s - %(message)s"
+                    )
+                )
+            root.addHandler(handler)
             return
 
         self._log_queue = self._mp_ctx.Queue()

@@ -34,8 +34,8 @@ jobs:
       - name: Run full test suite
         id: full_test
         continue-on-error: true
-        run: uv run pytest tests/ -v --tb=short
+        run: uv run pytest tests/ -v --tb=short -n auto
 
       - name: Rerun failed tests only
         if: steps.full_test.outcome == 'failure'
-        run: uv run pytest tests/ -v --tb=short --last-failed
+        run: uv run pytest tests/ -v --tb=short -n auto --last-failed

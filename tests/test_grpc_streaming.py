@@ -1,7 +1,6 @@
 import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
@@ -10,14 +9,9 @@ from pathlib import Path
 
 import pytest
 
+from tests import _get_free_port
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _get_free_port() -> int:
-    """Return an available TCP port on 127.0.0.1."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def _start_server_with_grpc(repo_path: Path):

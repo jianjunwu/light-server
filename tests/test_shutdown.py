@@ -13,17 +13,10 @@ from pathlib import Path
 import pytest
 import requests
 
+from tests import _get_free_port
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _get_free_port() -> int:
-    """Return an available TCP port on 127.0.0.1."""
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def _make_server_config(repo_path: Path, http_port: int, load_models: list[str] | None = None) -> str:
@@ -69,6 +62,7 @@ def _start_server(repo_path: Path, http_port: int, load_models: list[str] | None
         stderr=subprocess.STDOUT,
         text=True,
         cwd=str(PROJECT_ROOT),
+        start_new_session=True,
     )
     return proc, temp_config
 
@@ -89,14 +83,15 @@ def _wait_for_ready(http_port: int, timeout: float = 15.0) -> None:
 
 
 def _cleanup(proc: subprocess.Popen, temp_config: str) -> None:
-    """Terminate process and clean up temp file."""
-    if proc.poll() is None:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+    """Kill process group and clean up temp file."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
     try:
         Path(temp_config).unlink()
     except OSError:

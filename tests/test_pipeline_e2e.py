@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import socket
+import os
+import signal
 import subprocess
 import sys
 import time
@@ -11,14 +12,9 @@ from pathlib import Path
 import pytest
 import requests
 
+from tests import _get_free_port
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _get_free_port() -> int:
-    """Return an available TCP port on 127.0.0.1."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def _make_server_config(repo_path: Path, http_port: int, load_models: list[str]) -> str:
@@ -63,17 +59,20 @@ def _start_server(config_path: Path) -> subprocess.Popen:
         stderr=subprocess.STDOUT,
         text=True,
         cwd=str(PROJECT_ROOT),
+        start_new_session=True,
     )
 
 
 def _stop_server(proc: subprocess.Popen) -> None:
-    """Gracefully terminate the server subprocess."""
-    proc.terminate()
+    """Terminate the server subprocess and its children."""
     try:
-        proc.wait(timeout=5)
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        pass
     # Give the OS a moment to free the port
     time.sleep(0.5)
 

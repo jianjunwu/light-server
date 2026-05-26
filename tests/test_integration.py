@@ -1,5 +1,6 @@
 import json
-import socket
+import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -9,14 +10,9 @@ from pathlib import Path
 import pytest
 import requests
 
+from tests import _get_free_port
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _get_free_port() -> int:
-    """Return an available TCP port on 127.0.0.1."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def _make_server_config(repo_path: Path, http_port: int, grpc_port: int, metrics_port: int) -> str:
@@ -42,12 +38,14 @@ server:
 
 
 def _cleanup(proc, temp_config):
-    proc.terminate()
     try:
-        proc.wait(timeout=5)
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        pass
     try:
         Path(temp_config).unlink()
     except OSError:
@@ -79,6 +77,7 @@ def test_server_startup_and_inference(isolated_model_repo):
         stderr=subprocess.STDOUT,
         text=True,
         cwd=str(PROJECT_ROOT),
+        start_new_session=True,
     )
 
     try:

@@ -1,6 +1,13 @@
+import os
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _expose_worker_id(worker_id):
+    """Store xdist worker ID so standalone helpers can access it."""
+    os.environ["_PYTEST_XDIST_WORKER"] = worker_id or "master"
 
 
 @pytest.fixture

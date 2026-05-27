@@ -85,11 +85,22 @@ class ProjectGenerator:
             "  grpc_port: 8001",
             "  metrics_port: 8002",
             "  log_level: info",
+            "  # timeout: 30.0               # Request timeout in seconds",
+            "  # http_workers: 1             # HTTP worker processes (None = auto)",
+            "  # transport: mp              # mp | zmq",
             "",
             "logging:",
+            "  mode: queue                  # queue | direct",
             "  level: info",
-            "  format: text",
+            "  format: text                 # text | json",
+            "  # output: /dev/stdout         # Combined log output path",
             "  info_output: /dev/stdout",
+            "  # error_output: /dev/stderr   # Error-only log path",
+            "  # rotation: daily             # Rotation strategy name",
+            "  rotate_by: none              # none | size | time",
+            "  # max_size: 100               # Max log file size in MB (for size rotation)",
+            "  # when: midnight              # Rotation interval (for time rotation)",
+            "  # backup_count: 7             # Number of backup log files to keep",
             "",
             f"grpc:\n  enabled: {str(grpc_enabled).lower()}",
             "",
@@ -113,21 +124,31 @@ class ProjectGenerator:
 
         lines = [
             "# Orchestration config: controls which models are loaded and how.",
+            "#",
+            "# control_mode: explicit | poll | all",
+            "#   explicit: only load models listed in load_models",
+            "#   poll:     auto-detect repo changes and load/unload models",
+            "#   all:      load all available models on startup",
             "control_mode: explicit",
             "poll_interval: 5",
             "",
-            "# List of model names to load on startup",
+            "# List of model names to load on startup (used when control_mode = explicit)",
             "load_models:",
             f"  - {model_name}",
             "",
             "# Per-model loading strategy (no inference parameters here)",
+            "#",
+            "# load_policy: explicit | all | latest",
+            "#   explicit: only load versions listed in versions_to_load",
+            "#   all:      load all discovered versions",
+            "#   latest:   load only the highest version number",
             "models:",
             f"  - name: {model_name}",
             "    load_policy: explicit",
             "    versions_to_load:",
             '      - "1"',
-            "    # default_version: \"1\"",
-            "    # max_loaded_versions: 2",
+            "    # default_version: \"1\"        # Version to activate after loading",
+            "    # max_loaded_versions: 2      # Maximum versions to keep loaded",
         ]
 
         return "\n".join(lines) + "\n"
@@ -139,30 +160,48 @@ class ProjectGenerator:
     def _render_config_yaml(self) -> str:
         batch = self.options.get("batch", False)
         stream = self.options.get("stream", False)
+
         lines = [
             "# Inference parameters for this model version",
+            "",
+            "# API endpoint path",
+            "api_path: /predict",
+            "",
+            "# Dynamic batching",
         ]
         if batch:
             lines.extend([
                 "max_batch_size: 4",
                 "batch_timeout: 0.01",
             ])
-        if stream:
-            lines.append("stream: true")
-        lines.extend([
-            "",
-            "# Resource allocation (optional)",
-            "# accelerator: auto          # auto | cpu | cuda | mps | tpu",
-            "# devices: 1                 # number of GPUs / devices",
-            "# workers_per_device: 1      # inference workers per device",
-        ])
-        if not batch:
+        else:
             lines.extend([
-                "",
-                "# Dynamic batching (optional)",
                 "# max_batch_size: 4",
                 "# batch_timeout: 0.01",
             ])
+        lines.extend([
+            "",
+            "# Streaming",
+        ])
+        if stream:
+            lines.append("stream: true")
+        else:
+            lines.append("# stream: true")
+        lines.extend([
+            "# bidirectional: false        # Bidirectional streaming",
+            "",
+            "# Continuous batching (for LLM)",
+            "# continuous_batching: false",
+            "# max_sequence_length: 2048   # Max tokens per sequence",
+            "",
+            "# Resource allocation",
+            "# accelerator: auto           # auto | cpu | cuda | mps | tpu",
+            "# devices: 1                  # Number of GPUs / devices",
+            "# workers_per_device: 1       # Inference workers per device",
+            "",
+            "# Queue limits",
+            "# max_queue_size: 1000        # Max pending requests per model",
+        ])
         return "\n".join(lines) + "\n"
 
     def _render_dockerfile(self) -> str:

@@ -108,7 +108,7 @@ class TestProjectGenerator:
         assert "devices:" in cfg
         assert "workers_per_device:" in cfg
         assert "accelerator:" in cfg
-        assert "stream" not in cfg
+        assert "# stream:" in cfg
 
     def test_duplicate_project_name_raises(self, tmp_workspace: Path):
         gen = ProjectGenerator(
@@ -219,6 +219,67 @@ class TestProjectGenerator:
         assert "named_proj" in readme
         assert "gpt_demo" in readme
         assert "llm" in readme
+
+
+    def test_server_yaml_has_all_fields(self, tmp_workspace: Path):
+        """server.yaml should contain all ServerConfig and LoggingConfig fields."""
+        gen = ProjectGenerator(
+            project_name="full_srv",
+            template="empty",
+            output_dir=str(tmp_workspace),
+            options={"model_name": "m"},
+        )
+        root = gen.generate()
+        yaml_text = (root / "server.yaml").read_text()
+        # ServerConfig fields
+        assert "timeout:" in yaml_text, "missing timeout field"
+        assert "http_workers:" in yaml_text, "missing http_workers field"
+        assert "transport:" in yaml_text, "missing transport field"
+        # LoggingConfig fields
+        assert "mode:" in yaml_text, "missing logging mode field"
+        assert "rotation:" in yaml_text, "missing rotation field"
+        assert "rotate_by:" in yaml_text, "missing rotate_by field"
+        assert "max_size:" in yaml_text, "missing max_size field"
+        assert "when:" in yaml_text, "missing when field"
+        assert "backup_count:" in yaml_text, "missing backup_count field"
+
+    def test_config_yaml_has_all_fields(self, tmp_workspace: Path):
+        """config.yaml should contain all ModelConfig fields."""
+        gen = ProjectGenerator(
+            project_name="full_cfg",
+            template="empty",
+            output_dir=str(tmp_workspace),
+            options={"model_name": "m"},
+        )
+        root = gen.generate()
+        cfg = (root / "model_repo" / "m" / "1" / "config.yaml").read_text()
+        assert "api_path:" in cfg, "missing api_path field"
+        assert "stream:" in cfg, "missing stream field"
+        assert "bidirectional:" in cfg, "missing bidirectional field"
+        assert "continuous_batching:" in cfg, "missing continuous_batching field"
+        assert "max_sequence_length:" in cfg, "missing max_sequence_length field"
+        assert "max_queue_size:" in cfg, "missing max_queue_size field"
+
+    def test_orchestration_yaml_has_all_fields_and_comments(self, tmp_workspace: Path):
+        """orchestration.yaml should document all options with comments."""
+        gen = ProjectGenerator(
+            project_name="full_orch",
+            template="empty",
+            output_dir=str(tmp_workspace),
+            options={"model_name": "m"},
+        )
+        root = gen.generate()
+        orch = (root / "model_repo" / "orchestration.yaml").read_text()
+        # control_mode options documented
+        assert "explicit" in orch, "missing explicit mode mention"
+        assert "poll" in orch, "missing poll mode mention"
+        assert "all" in orch, "missing all mode mention"
+        # load_policy options documented
+        assert "load_policy" in orch, "missing load_policy field"
+        # All strategy fields present
+        assert "default_version:" in orch, "missing default_version field"
+        assert "max_loaded_versions:" in orch, "missing max_loaded_versions field"
+        assert "versions_to_load:" in orch, "missing versions_to_load field"
 
 
 class TestCLInit:

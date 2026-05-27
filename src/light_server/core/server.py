@@ -219,10 +219,13 @@ class LightServer:
         }
 
         for name in names_to_load:
-            strategy = strategy_by_name.get(name, {})
-            load_policy = strategy.get("load_policy", "explicit" if mode in ("explicit", "poll") else "all")
-            versions_to_load = strategy.get("versions_to_load", [])
-            default_version = strategy.get("default_version")
+            from light_server.config import ModelStrategyConfig
+            strategy = strategy_by_name.get(name)
+            if strategy is None:
+                strategy = ModelStrategyConfig()
+            load_policy = strategy.load_policy or ("explicit" if mode in ("explicit", "poll") else "all")
+            versions_to_load = strategy.versions_to_load
+            default_version = strategy.default_version
 
             models = by_model.get(name, [])
             versions_loaded = []

@@ -247,3 +247,68 @@ def test_setup_worker_logging_fallback_without_queue_uses_configured_format():
     # Output should be valid JSON
     parsed = json.loads(output.strip())
     assert parsed["message"] == "hello_json"
+
+
+def test_log_consumer_skips_console_when_info_output_is_stdout():
+    """When info_output points to /dev/stdout, console handler should not be added to avoid duplicate output."""
+    queue = mp.Queue()
+    consumer = LogConsumer(
+        queue=queue,
+        level="INFO",
+        fmt="text",
+        info_output="/dev/stdout",
+        rotate_by="none",
+    )
+    consumer.start()
+    import time
+
+    time.sleep(0.2)
+
+    handler_names = [name for name, _ in consumer._handlers]
+    assert "console" not in handler_names
+    assert "info" in handler_names
+    consumer.stop()
+
+
+def test_log_consumer_skips_console_when_error_output_is_stderr():
+    """When error_output points to /dev/stderr, console handler should not be added to avoid duplicate output."""
+    queue = mp.Queue()
+    consumer = LogConsumer(
+        queue=queue,
+        level="INFO",
+        fmt="text",
+        error_output="/dev/stderr",
+        rotate_by="none",
+    )
+    consumer.start()
+    import time
+
+    time.sleep(0.2)
+
+    handler_names = [name for name, _ in consumer._handlers]
+    assert "console" not in handler_names
+    assert "error" in handler_names
+    consumer.stop()
+
+
+def test_log_consumer_keeps_console_for_regular_file_output():
+    """When info_output is a regular file path, console handler should still be added."""
+    queue = mp.Queue()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        info_path = str(Path(tmpdir) / "info.log")
+        consumer = LogConsumer(
+            queue=queue,
+            level="INFO",
+            fmt="text",
+            info_output=info_path,
+            rotate_by="none",
+        )
+        consumer.start()
+        import time
+
+        time.sleep(0.2)
+
+        handler_names = [name for name, _ in consumer._handlers]
+        assert "console" in handler_names
+        assert "info" in handler_names
+        consumer.stop()

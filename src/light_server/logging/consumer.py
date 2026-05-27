@@ -109,18 +109,23 @@ class LogConsumer:
         if self.error_output:
             self._handlers.append(("error", self._build_handler(self.error_output, logging.ERROR)))
 
-        # Always log to console regardless of file outputs
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(self.level)
-        if self.fmt == "json":
-            console_handler.setFormatter(_JSONFormatter())
-        else:
-            console_handler.setFormatter(
-                logging.Formatter(
-                    "%(asctime)s - %(processName)s[%(process)d] - %(name)s - %(levelname)s - %(message)s"
+        # Always log to console unless a file output already targets stdout/stderr
+        _console_targets = {"/dev/stdout", "/dev/stderr", "-"}
+        _already_to_console = any(
+            p in _console_targets for p in (self.info_output, self.error_output) if p
+        )
+        if not _already_to_console:
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(self.level)
+            if self.fmt == "json":
+                console_handler.setFormatter(_JSONFormatter())
+            else:
+                console_handler.setFormatter(
+                    logging.Formatter(
+                        "%(asctime)s - %(processName)s[%(process)d] - %(name)s - %(levelname)s - %(message)s"
+                    )
                 )
-            )
-        self._handlers.append(("console", console_handler))
+            self._handlers.append(("console", console_handler))
 
         while not self._stop_event.is_set():
             try:

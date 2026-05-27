@@ -709,3 +709,139 @@ class TestHttpWorkerShmCleanup:
                 http_worker_main(state, mock_sock)
 
         mock_shm.shutdown.assert_called_once()
+
+
+class TestManagerQueueCleanup:
+    """Verify Manager().Queue() (AutoProxy) is handled safely during shutdown."""
+
+    def test_unload_no_warning_on_manager_proxy_worker_queues(self, tmp_path: Path, caplog):
+        """Manager Queue has no close(); unload must not log warnings."""
+        import logging
+        registry = ModelRegistry()
+        manager = ModelManager(
+            repo_path=tmp_path,
+            registry=registry,
+        )
+
+        mock_worker = MagicMock()
+        mock_worker.is_alive.return_value = False
+
+        registry.register("test_model", "1")
+
+        manager._workers["test_model_1"] = [mock_worker]
+        manager._litapi_instances["test_model_1"] = MagicMock()
+        manager._workers_setup_status["test_model_1"] = mp.Manager().dict()
+
+        # Use a real Manager Queue (AutoProxy, no close() method)
+        real_queue = mp.Manager().Queue()
+        registry.set_worker_queues("test_model", "1", [real_queue])
+
+        with caplog.at_level(logging.WARNING):
+            result = manager.unload("test_model", "1")
+
+        assert result is True
+        assert "Error closing queue" not in caplog.text
+
+    def test_unload_no_warning_on_manager_proxy_legacy_queue(self, tmp_path: Path, caplog):
+        """Legacy single queue path must not log warnings for Manager Queue."""
+        import logging
+        registry = ModelRegistry()
+        manager = ModelManager(
+            repo_path=tmp_path,
+            registry=registry,
+        )
+
+        mock_worker = MagicMock()
+        mock_worker.is_alive.return_value = False
+
+        registry.register("test_model", "1")
+
+        manager._workers["test_model_1"] = [mock_worker]
+        manager._litapi_instances["test_model_1"] = MagicMock()
+        manager._workers_setup_status["test_model_1"] = mp.Manager().dict()
+
+        # Use a real Manager Queue (AutoProxy, no close() method)
+        real_queue = mp.Manager().Queue()
+        registry.set_queue("test_model", "1", real_queue)
+        # Do NOT set worker_queues, so legacy path is taken
+
+        with caplog.at_level(logging.WARNING):
+            result = manager.unload("test_model", "1")
+
+        assert result is True
+        assert "Error closing queue" not in caplog.text
+
+
+class TestAdminLoopEOFError:
+    """Verify admin-loop handles EOFError when Manager shuts down."""
+
+    def test_admin_loop_catches_eof_error(self):
+        """admin-loop must break cleanly on EOFError instead of crashing."""
+        from light_server.config import Config
+        from light_server.core.server import LightServer
+        from unittest.mock import patch
+
+        config = Config()
+        server = LightServer(config)
+
+        # Track what target function the thread receives
+        captured_targets = []
+
+        def capture_thread(*args, **kwargs):
+            t = MagicMock()
+            t.target = kwargs.get("target")
+            captured_targets.append(t)
+            return t
+
+        with patch("threading.Thread", side_effect=capture_thread):
+            mock_queue = MagicMock()
+            mock_queue.get.side_effect = EOFError
+            server._admin_queue = mock_queue
+            server._start_admin_loop()
+
+        assert len(captured_targets) == 1
+        loop_fn = captured_targets[0].target
+
+        # Calling the loop function should NOT raise EOFError
+        loop_fn()
+        # If we reach here, the loop broke cleanly
+
+
+class TestShutdownNoCloseQueue:
+    """Verify shutdown() does not call close() on queues that lack it."""
+
+    def test_shutdown_skips_close_on_queue_without_close(self):
+        """shutdown() must not call close() on queues without the method."""
+        from light_server.config import Config
+        from light_server.core.server import LightServer
+
+        config = Config()
+        server = LightServer(config)
+
+        # Queue without close/join_thread (simulates Manager Queue)
+        class NoCloseQueue:
+            def put(self, item):
+                pass
+            def get(self, timeout=None):
+                from queue import Empty
+                raise Empty
+
+        server._admin_queue = NoCloseQueue()
+        server._admin_response_queues = [NoCloseQueue()]
+
+        # Minimal mocks for shutdown to run
+        server.response_buffer = MagicMock()
+        server._http_worker_procs = []
+        server.registry.list_loaded = MagicMock(return_value=[])
+        server.transport = MagicMock()
+        server.transport._queues = [NoCloseQueue()]
+        server.model_manager._workers = {}
+        server.model_manager.shutdown = MagicMock()
+        server._grpc_server = None
+        server._metrics_server = None
+        server._log_consumer = None
+        server._log_queue = None
+        server._metrics_dir = None
+
+        # Should not raise AttributeError
+        server.shutdown()

@@ -341,6 +341,8 @@ class LightServer:
                     cmd = self._admin_queue.get(timeout=0.5)
                 except queue.Empty:
                     continue
+                except (EOFError, OSError, BrokenPipeError):
+                    break
                 try:
                     cmd_type = cmd["cmd"]
                     response_queue = cmd["response_queue"]
@@ -493,11 +495,12 @@ class LightServer:
             broker.stop()
         # MPQueue cleanup: close individual queues after sentinel drain
         for q in getattr(self.transport, "_queues", []):
-            try:
-                q.close()
-                q.join_thread()
-            except Exception:
-                pass
+            if hasattr(q, "close"):
+                try:
+                    q.close()
+                    q.join_thread()
+                except Exception:
+                    pass
 
         # Wait for all inference worker processes to fully exit
         for workers in list(self.model_manager._workers.values()):
@@ -520,17 +523,19 @@ class LightServer:
         if self._metrics_server:
             self._metrics_server.shutdown()
         if self._admin_queue is not None:
-            try:
-                self._admin_queue.close()
-                self._admin_queue.join_thread()
-            except Exception:
-                pass
+            if hasattr(self._admin_queue, "close"):
+                try:
+                    self._admin_queue.close()
+                    self._admin_queue.join_thread()
+                except Exception:
+                    pass
         for q in getattr(self, "_admin_response_queues", []):
-            try:
-                q.close()
-                q.join_thread()
-            except Exception:
-                pass
+            if hasattr(q, "close"):
+                try:
+                    q.close()
+                    q.join_thread()
+                except Exception:
+                    pass
         # Clean up prometheus multiprocess temp directory
         if self._metrics_dir and os.path.isdir(self._metrics_dir):
             import shutil

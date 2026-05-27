@@ -551,19 +551,21 @@ class ModelManager:
                 worker_queues = self.registry.get_worker_queues(name, version)
                 if worker_queues:
                     for q in worker_queues:
-                        try:
-                            q.close()
-                            q.join_thread()
-                        except Exception as e:
-                            logger.warning(f"Error closing queue for {name} v{version}: {e}")
+                        if hasattr(q, "close"):
+                            try:
+                                q.close()
+                                q.join_thread()
+                            except Exception as e:
+                                logger.warning(f"Error closing queue for {name} v{version}: {e}")
                 # Also close the legacy single queue if it wasn't in worker_queues
                 q_legacy = self.registry.get_queue(name, version)
                 if q_legacy is not None:
-                    try:
-                        q_legacy.close()
-                        q_legacy.join_thread()
-                    except Exception as e:
-                        logger.warning(f"Error closing queue for {name} v{version}: {e}")
+                    if hasattr(q_legacy, "close"):
+                        try:
+                            q_legacy.close()
+                            q_legacy.join_thread()
+                        except Exception as e:
+                            logger.warning(f"Error closing queue for {name} v{version}: {e}")
 
                 # Clean up stream routing and worker loads for this model
                 self._worker_loads.pop(key, None)

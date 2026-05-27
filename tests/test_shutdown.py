@@ -21,20 +21,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def _make_server_config(repo_path: Path, http_port: int, load_models: list[str] | None = None) -> str:
     """Generate a server config YAML."""
-    load_block = ""
-    if load_models is not None:
-        if load_models:
-            load_block = "load_models:\n" + "\n".join(f"- {m}" for m in load_models)
-        else:
-            load_block = "load_models: []"
     return f"""
 grpc:
   enabled: false
 metrics:
   enabled: false
-{load_block}
 model_repository:
-  control_mode: explicit
   path: {repo_path}
 server:
   host: 127.0.0.1
@@ -43,10 +35,24 @@ server:
 """
 
 
+def _write_orchestration(repo_path: Path, load_models: list[str] | None = None) -> None:
+    """Write orchestration.yaml into the model repo."""
+    lines = ["control_mode: explicit", "poll_interval: 5"]
+    if load_models is not None:
+        if load_models:
+            lines.append("load_models:")
+            for m in load_models:
+                lines.append(f"  - {m}")
+        else:
+            lines.append("load_models: []")
+    (repo_path / "orchestration.yaml").write_text("\n".join(lines) + "\n")
+
+
 def _start_server(repo_path: Path, http_port: int, load_models: list[str] | None = None):
     """Start the server subprocess and return (proc, temp_config)."""
+    _write_orchestration(repo_path, load_models)
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write(_make_server_config(repo_path, http_port, load_models))
+        f.write(_make_server_config(repo_path, http_port))
         temp_config = f.name
 
     proc = subprocess.Popen(

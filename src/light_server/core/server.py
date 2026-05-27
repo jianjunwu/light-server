@@ -190,7 +190,7 @@ class LightServer:
         if self.config.metrics.enabled:
             self._start_metrics()
 
-        if self.config.model_repository.control_mode == "poll":
+        if self.config.orchestration.control_mode == "poll":
             self._start_poll_thread()
 
         try:
@@ -199,7 +199,7 @@ class LightServer:
             self.shutdown()
 
     def _load_initial_models(self) -> None:
-        mode = self.config.model_repository.control_mode
+        mode = self.config.orchestration.control_mode
         available = self.model_manager.list_repository()
 
         from collections import defaultdict
@@ -211,21 +211,21 @@ class LightServer:
         if mode == "all":
             names_to_load = list(by_model.keys())
         elif mode in ("explicit", "poll"):
-            names_to_load = self.config.load_models
+            names_to_load = self.config.orchestration.load_models
 
-        # Build lookup from config.models for per-model overrides
-        config_override_by_name = {m.name: m for m in self.config.models if getattr(m, "name", None)}
+        # Build lookup from orchestration.models for per-model strategies
+        strategy_by_name = {
+            m.name: m for m in self.config.orchestration.models if getattr(m, "name", None)
+        }
 
         for name in names_to_load:
-            model_cfg = self.model_manager.get_model_config(name)
-            load_policy = model_cfg.get("load_policy", "explicit" if mode in ("explicit", "poll") else "all")
-            versions_to_load = model_cfg.get("versions_to_load", [])
-            default_version = model_cfg.get("default_version")
+            strategy = strategy_by_name.get(name, {})
+            load_policy = strategy.get("load_policy", "explicit" if mode in ("explicit", "poll") else "all")
+            versions_to_load = strategy.get("versions_to_load", [])
+            default_version = strategy.get("default_version")
 
             models = by_model.get(name, [])
             versions_loaded = []
-
-            override = config_override_by_name.get(name)
 
             for m in models:
                 version = m["version"]
@@ -237,7 +237,7 @@ class LightServer:
                     should_load = version in versions_to_load if versions_to_load else True
 
                 if should_load:
-                    self.model_manager.load(name, version, config_override=override)
+                    self.model_manager.load(name, version)
                     versions_loaded.append(version)
 
             # Ensure default_version is active if specified and loaded
@@ -362,11 +362,11 @@ class LightServer:
                     elif cmd_type == "set_version_config":
                         success = self.model_manager.set_version_config(cmd["name"], cmd["version"], cmd["data"])
                         response_queue.put({"success": success})
-                    elif cmd_type == "get_model_config":
-                        cfg = self.model_manager.get_model_config(cmd["name"])
+                    elif cmd_type == "get_orchestration":
+                        cfg = self.model_manager.get_orchestration()
                         response_queue.put({"config": cfg})
-                    elif cmd_type == "set_model_config":
-                        success = self.model_manager.set_model_config(cmd["name"], cmd["data"])
+                    elif cmd_type == "set_orchestration":
+                        success = self.model_manager.set_orchestration(cmd["data"])
                         response_queue.put({"success": success})
                     else:
                         response_queue.put({"success": False, "error": f"Unknown cmd: {cmd_type}"})
@@ -403,23 +403,28 @@ class LightServer:
 
     def _start_poll_thread(self) -> None:
         def poll():
-            interval = self.config.model_repository.poll_interval
+            interval = self.config.orchestration.poll_interval
             while not self._shutdown_event.is_set():
                 time.sleep(interval)
                 self._poll_repository()
 
         t = threading.Thread(target=poll, daemon=True, name="repo-poll")
         t.start()
-        logger.info(f"Started repository polling (interval={self.config.model_repository.poll_interval}s)")
+        logger.info(f"Started repository polling (interval={self.config.orchestration.poll_interval}s)")
 
     def _poll_repository(self) -> None:
         available = {(m["name"], m["version"]) for m in self.model_manager.list_repository()}
         loaded = {(m["name"], m["version"]) for m in self.registry.list_loaded()}
 
+        orch = self.model_manager.get_orchestration()
+        strategy_by_name = {
+            m.get("name"): m for m in orch.get("models", [])
+        }
+
         for name, version in available - loaded:
-            model_cfg = self.model_manager.get_model_config(name)
-            load_policy = model_cfg.get("load_policy", "explicit")
-            versions_to_load = model_cfg.get("versions_to_load", [])
+            strategy = strategy_by_name.get(name, {})
+            load_policy = strategy.get("load_policy", "explicit")
+            versions_to_load = strategy.get("versions_to_load", [])
 
             should_load = False
             if load_policy == "all":

@@ -16,12 +16,8 @@ class ServerConfig:
     grpc_port: int = 8001
     metrics_port: int = 8002
     host: str = "0.0.0.0"
-    accelerator: str = "auto"
-    devices: int | str = "auto"
-    workers_per_device: int = 1
     timeout: float = 30.0
     log_level: str = "info"
-    num_api_servers: int = 1
     http_workers: int | None = None  # None = auto (max(1, cpu_count() - 1))
     transport: str = "mp"  # "mp" | "zmq"
 
@@ -55,12 +51,12 @@ class LoggingConfig:
 @dataclass
 class ModelRepositoryConfig:
     path: str = "./model_repo"
-    control_mode: str = "explicit"
-    poll_interval: int = 5
 
 
 @dataclass
 class ModelConfig:
+    """Per-version inference parameters (matches config.yaml)."""
+
     name: str = ""
     api_path: str = "/predict"
     max_batch_size: int = 1
@@ -73,6 +69,23 @@ class ModelConfig:
     devices: int | str | None = None
     workers_per_device: int | None = None
     max_queue_size: int = 1000
+
+
+@dataclass
+class ModelStrategyConfig:
+    name: str = ""
+    load_policy: str = "explicit"
+    versions_to_load: list[str] = field(default_factory=list)
+    default_version: str | None = None
+    max_loaded_versions: int | None = None
+
+
+@dataclass
+class OrchestrationConfig:
+    control_mode: str = "explicit"
+    poll_interval: int = 5
+    load_models: list[str] = field(default_factory=list)
+    models: list[ModelStrategyConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -98,11 +111,14 @@ class Config:
     grpc: GrpcConfig = field(default_factory=GrpcConfig)
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
-    model_repository: ModelRepositoryConfig = field(default_factory=ModelRepositoryConfig)
-    load_models: list[str] = field(default_factory=list)
+    model_repository: ModelRepositoryConfig = field(
+        default_factory=ModelRepositoryConfig
+    )
     webui: WebUIConfig = field(default_factory=WebUIConfig)
-    models: list[ModelConfig] = field(default_factory=list)
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
+    orchestration: OrchestrationConfig = field(
+        default_factory=OrchestrationConfig
+    )
 
 
 def _to_dataclass(data: dict[str, Any], cls: type) -> Any:
@@ -134,17 +150,42 @@ def load_config(path: str | Path) -> Config:
     if "logging" in raw:
         config.logging = _to_dataclass(raw["logging"], LoggingConfig)
     if "model_repository" in raw:
-        config.model_repository = _to_dataclass(raw["model_repository"], ModelRepositoryConfig)
-    if "load_models" in raw:
-        config.load_models = raw["load_models"]
+        config.model_repository = _to_dataclass(
+            raw["model_repository"], ModelRepositoryConfig
+        )
     if "webui" in raw:
         config.webui = _to_dataclass(raw["webui"], WebUIConfig)
-    if "models" in raw:
-        config.models = [_to_dataclass(m, ModelConfig) for m in raw["models"]]
     if "features" in raw:
         config.features = _to_dataclass(raw["features"], FeaturesConfig)
 
     # Expand environment variables in paths
-    config.model_repository.path = os.path.expandvars(config.model_repository.path)
+    config.model_repository.path = os.path.expandvars(
+        config.model_repository.path
+    )
 
     return config
+
+
+def load_orchestration(path: str | Path) -> OrchestrationConfig:
+    """Load orchestration configuration from a YAML file."""
+    path = Path(path)
+    if not path.exists():
+        return OrchestrationConfig()
+
+    with open(path, "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+
+    orch = OrchestrationConfig()
+
+    if "control_mode" in raw:
+        orch.control_mode = raw["control_mode"]
+    if "poll_interval" in raw:
+        orch.poll_interval = raw["poll_interval"]
+    if "load_models" in raw:
+        orch.load_models = raw["load_models"]
+    if "models" in raw:
+        orch.models = [
+            _to_dataclass(m, ModelStrategyConfig) for m in raw["models"]
+        ]
+
+    return orch

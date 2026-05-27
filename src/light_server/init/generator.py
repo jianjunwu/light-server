@@ -52,6 +52,7 @@ class ProjectGenerator:
         # Model files
         self._write(root / "model_repo" / model_name / "1" / "model.py", self._render_model_py())
         self._write(root / "model_repo" / model_name / "1" / "config.yaml", self._render_config_yaml())
+        self._write(root / "model_repo" / "orchestration.yaml", self._render_orchestration_yaml())
 
         return root
 
@@ -76,9 +77,6 @@ class ProjectGenerator:
         grpc_enabled = self.options.get("grpc", True)
         metrics_enabled = self.options.get("metrics", True)
         webui_enabled = self.options.get("webui", True)
-        batch = self.options.get("batch", False)
-        stream = self.options.get("stream", False)
-        model_name = self.options.get("model_name", "my_model")
 
         lines = [
             "server:",
@@ -99,25 +97,7 @@ class ProjectGenerator:
             "",
             "model_repository:",
             "  path: ./model_repo",
-            "  control_mode: explicit",
-            "",
-            "load_models:",
-            f"  - {model_name}",
         ]
-
-        if batch or stream:
-            lines.extend([
-                "",
-                "models:",
-                f"  - name: {model_name}",
-            ])
-            if batch:
-                lines.extend([
-                    "    max_batch_size: 4",
-                    "    batch_timeout: 0.01",
-                ])
-            if stream:
-                lines.append("    stream: true")
 
         if webui_enabled:
             lines.extend([
@@ -128,6 +108,30 @@ class ProjectGenerator:
 
         return "\n".join(lines) + "\n"
 
+    def _render_orchestration_yaml(self) -> str:
+        model_name = self.options.get("model_name", "my_model")
+
+        lines = [
+            "# Orchestration config: controls which models are loaded and how.",
+            "control_mode: explicit",
+            "poll_interval: 5",
+            "",
+            "# List of model names to load on startup",
+            "load_models:",
+            f"  - {model_name}",
+            "",
+            "# Per-model loading strategy (no inference parameters here)",
+            "models:",
+            f"  - name: {model_name}",
+            "    load_policy: explicit",
+            "    versions_to_load:",
+            '      - "1"',
+            "    # default_version: \"1\"",
+            "    # max_loaded_versions: 2",
+        ]
+
+        return "\n".join(lines) + "\n"
+
     def _render_model_py(self) -> str:
         template_file = f"{self.template.replace('-', '_')}_model.py"
         return self._load_template(template_file)
@@ -135,7 +139,9 @@ class ProjectGenerator:
     def _render_config_yaml(self) -> str:
         batch = self.options.get("batch", False)
         stream = self.options.get("stream", False)
-        lines = []
+        lines = [
+            "# Inference parameters for this model version",
+        ]
         if batch:
             lines.extend([
                 "max_batch_size: 4",
@@ -143,10 +149,20 @@ class ProjectGenerator:
             ])
         if stream:
             lines.append("stream: true")
-        if not lines:
-            lines.append("# Add model-specific config here")
-            lines.append("# max_batch_size: 4")
-            lines.append("# batch_timeout: 0.01")
+        lines.extend([
+            "",
+            "# Resource allocation (optional)",
+            "# accelerator: auto          # auto | cpu | cuda | mps | tpu",
+            "# devices: 1                 # number of GPUs / devices",
+            "# workers_per_device: 1      # inference workers per device",
+        ])
+        if not batch:
+            lines.extend([
+                "",
+                "# Dynamic batching (optional)",
+                "# max_batch_size: 4",
+                "# batch_timeout: 0.01",
+            ])
         return "\n".join(lines) + "\n"
 
     def _render_dockerfile(self) -> str:

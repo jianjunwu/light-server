@@ -28,23 +28,33 @@ def _create_test_env(repo_path: Path):
     return manager, registry, transport, mm
 
 
-def _write_model_config(repo_path: Path, content: str) -> None:
-    """Helper to overwrite test_model/model_config.yaml."""
-    path = repo_path / "test_model" / "model_config.yaml"
+def _write_orchestration(repo_path: Path, content: str) -> None:
+    """Helper to overwrite model_repo/orchestration.yaml."""
+    path = repo_path / "orchestration.yaml"
     path.write_text(content)
 
 
-def _restore_model_config(repo_path: Path) -> None:
-    """Restore default test_model/model_config.yaml."""
-    _write_model_config(
+def _restore_orchestration(repo_path: Path) -> None:
+    """Restore default model_repo/orchestration.yaml."""
+    _write_orchestration(
         repo_path,
-        'default_version: "1"\n'
-        "load_policy: explicit\n"
-        "versions_to_load:\n"
-        '  - "1"\n'
-        '  - "2"\n'
-        "auto_activate_on_load: true\n"
-        "max_loaded_versions: 2\n",
+        'control_mode: explicit\n'
+        'poll_interval: 5\n'
+        'load_models:\n'
+        '  - test_model\n'
+        'models:\n'
+        '  - name: test_model\n'
+        '    load_policy: explicit\n'
+        '    versions_to_load:\n'
+        '      - "1"\n'
+        '      - "2"\n'
+        '    default_version: "1"\n'
+        '  - name: stream_model\n'
+        '    load_policy: all\n'
+        '  - name: my_ensemble\n'
+        '    load_policy: all\n'
+        '  - name: cb_model\n'
+        '    load_policy: all\n',
     )
 
 
@@ -191,23 +201,36 @@ def test_on_file_changed_callback(isolated_model_repo):
     mm.unload("test_model", version="2")
 
 
-def test_model_config_read(isolated_model_repo):
-    """Verify get_model_config reads model_config.yaml correctly."""
+def test_orchestration_read(isolated_model_repo):
+    """Verify get_orchestration reads orchestration.yaml correctly."""
     _m, _r, _t, mm = _create_test_env(isolated_model_repo)
-    cfg = mm.get_model_config("test_model")
-    assert cfg["default_version"] == "1"
-    assert cfg["load_policy"] == "explicit"
-    assert cfg["versions_to_load"] == ["1", "2"]
-    assert cfg["max_loaded_versions"] == 2
+    orch = mm.get_orchestration()
+    assert orch["control_mode"] == "explicit"
+    assert orch["load_models"] == ["test_model"]
+    test_model = next(m for m in orch["models"] if m["name"] == "test_model")
+    assert test_model["default_version"] == "1"
+    assert test_model["load_policy"] == "explicit"
+    assert test_model["versions_to_load"] == ["1", "2"]
 
 
-def test_model_config_default_version(isolated_model_repo):
+def test_orchestration_default_version(isolated_model_repo):
     """default_version is activated even when another version loads first."""
-    _write_model_config(
+    _write_orchestration(
         isolated_model_repo,
-        'default_version: "2"\n'
-        "load_policy: all\n"
-        "auto_activate_on_load: true\n",
+        'control_mode: explicit\n'
+        'poll_interval: 5\n'
+        'load_models:\n'
+        '  - test_model\n'
+        'models:\n'
+        '  - name: test_model\n'
+        '    load_policy: all\n'
+        '    default_version: "2"\n'
+        '  - name: stream_model\n'
+        '    load_policy: all\n'
+        '  - name: my_ensemble\n'
+        '    load_policy: all\n'
+        '  - name: cb_model\n'
+        '    load_policy: all\n',
     )
     try:
         _m, registry, _t, mm = _create_test_env(isolated_model_repo)
@@ -225,16 +248,28 @@ def test_model_config_default_version(isolated_model_repo):
 
         mm.unload("test_model")
     finally:
-        _restore_model_config(isolated_model_repo)
+        _restore_orchestration(isolated_model_repo)
 
 
-def test_model_config_max_loaded_versions(isolated_model_repo):
+def test_orchestration_max_loaded_versions(isolated_model_repo):
     """Loading beyond max_loaded_versions evicts the oldest version."""
-    _write_model_config(
+    _write_orchestration(
         isolated_model_repo,
-        'default_version: "1"\n'
-        "load_policy: all\n"
-        "max_loaded_versions: 1\n",
+        'control_mode: explicit\n'
+        'poll_interval: 5\n'
+        'load_models:\n'
+        '  - test_model\n'
+        'models:\n'
+        '  - name: test_model\n'
+        '    load_policy: all\n'
+        '    default_version: "1"\n'
+        '    max_loaded_versions: 1\n'
+        '  - name: stream_model\n'
+        '    load_policy: all\n'
+        '  - name: my_ensemble\n'
+        '    load_policy: all\n'
+        '  - name: cb_model\n'
+        '    load_policy: all\n',
     )
     try:
         _m, registry, _t, mm = _create_test_env(isolated_model_repo)
@@ -250,7 +285,7 @@ def test_model_config_max_loaded_versions(isolated_model_repo):
 
         mm.unload("test_model")
     finally:
-        _restore_model_config(isolated_model_repo)
+        _restore_orchestration(isolated_model_repo)
 
 
 def test_reload_model(isolated_model_repo):
@@ -324,19 +359,29 @@ def test_version_config_read_write(isolated_model_repo):
     assert cfg["batch_timeout"] == 0.05
 
 
-def test_model_config_read_write(isolated_model_repo):
-    """Read and write model-level model_config.yaml."""
+def test_orchestration_read_write(isolated_model_repo):
+    """Read and write model_repo/orchestration.yaml."""
     _m, _r, _t, mm = _create_test_env(isolated_model_repo)
 
-    # Read existing config
-    cfg = mm.get_model_config("test_model")
-    assert cfg["default_version"] == "1"
+    # Read existing orchestration
+    orch = mm.get_orchestration()
+    assert orch["control_mode"] == "explicit"
 
-    # Write new config
-    new_cfg = {"default_version": "2", "max_loaded_versions": 3}
-    assert mm.set_model_config("test_model", new_cfg)
+    # Write new orchestration
+    new_orch = {
+        "control_mode": "poll",
+        "poll_interval": 10,
+        "load_models": ["test_model"],
+        "models": [
+            {"name": "test_model", "load_policy": "all", "default_version": "2"}
+        ],
+    }
+    assert mm.set_orchestration(new_orch)
 
     # Read back
-    cfg = mm.get_model_config("test_model")
-    assert cfg["default_version"] == "2"
-    assert cfg["max_loaded_versions"] == 3
+    orch = mm.get_orchestration()
+    assert orch["control_mode"] == "poll"
+    assert orch["poll_interval"] == 10
+    test_model = next(m for m in orch["models"] if m["name"] == "test_model")
+    assert test_model["default_version"] == "2"
+    assert test_model["load_policy"] == "all"

@@ -20,12 +20,9 @@ def _make_server_config(repo_path: Path, http_port: int, grpc_port: int, metrics
     return f"""
 grpc:
   enabled: false
-load_models:
-- test_model
 metrics:
   enabled: false
 model_repository:
-  control_mode: explicit
   path: {repo_path}
 server:
   grpc_port: {grpc_port}
@@ -33,8 +30,17 @@ server:
   http_port: {http_port}
   log_level: warning
   metrics_port: {metrics_port}
-  num_api_servers: 1
 """
+
+
+def _write_orchestration(repo_path: Path) -> None:
+    """Write orchestration.yaml into the model repo."""
+    (repo_path / "orchestration.yaml").write_text(
+        "control_mode: explicit\n"
+        "poll_interval: 5\n"
+        "load_models:\n"
+        "  - test_model\n"
+    )
 
 
 def _cleanup(proc, temp_config):
@@ -57,6 +63,8 @@ def test_server_startup_and_inference(isolated_model_repo):
     http_port = _get_free_port()
     grpc_port = _get_free_port()
     metrics_port = _get_free_port()
+
+    _write_orchestration(isolated_model_repo)
 
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".yaml", delete=False

@@ -86,11 +86,15 @@ def test_cb_forces_single_worker(model_repo):
     registry = ModelRegistry(manager)
     mm = ModelManager(model_repo, registry)
 
-    # Override with workers_per_device=3; should be forced to 1
-    override = ModelConfig(
-        workers_per_device=3,
-    )
-    success = mm.load("cb_model", "1", config_override=override)
+    # Write workers_per_device=3 to config.yaml; should be forced to 1
+    import yaml
+    config_yaml = model_repo / "cb_model" / "1" / "config.yaml"
+    # Preserve existing continuous_batching and other fields, override workers_per_device
+    existing = yaml.safe_load(config_yaml.read_text()) or {}
+    existing["workers_per_device"] = 3
+    config_yaml.write_text(yaml.dump(existing, default_flow_style=False))
+
+    success = mm.load("cb_model", "1")
     assert success is True
 
     entry = registry.get("cb_model", "1")

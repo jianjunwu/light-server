@@ -9,7 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-from light_server.config import load_config
+from light_server.config import load_config, load_orchestration
 
 
 def _serve_args(parser: argparse.ArgumentParser) -> None:
@@ -146,8 +146,15 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     if args.config:
         config = load_config(args.config)
+        # Load orchestration from model_repo/orchestration.yaml
+        repo_path = Path(config.model_repository.path)
+        if not repo_path.is_absolute():
+            repo_path = Path(args.config).parent / repo_path
+        orch_path = repo_path / "orchestration.yaml"
+        if orch_path.exists():
+            config.orchestration = load_orchestration(orch_path)
     else:
-        from light_server.config import Config, GrpcConfig, LoggingConfig, MetricsConfig, ModelRepositoryConfig, ServerConfig
+        from light_server.config import Config, GrpcConfig, LoggingConfig, MetricsConfig, ModelRepositoryConfig, ServerConfig, OrchestrationConfig
 
         log_info = args.log_info
         log_error = args.log_error
@@ -163,9 +170,6 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             server=ServerConfig(
                 http_port=args.port or 8000,
                 host=args.host or "0.0.0.0",
-                accelerator=args.accelerator or "auto",
-                devices=args.devices or "auto",
-                workers_per_device=args.workers_per_device or 1,
                 timeout=args.timeout or 30.0,
                 log_level=args.log_level or "info",
                 http_workers=args.http_workers,
@@ -184,25 +188,18 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             ),
             model_repository=ModelRepositoryConfig(
                 path=model_repo_path,
-                control_mode="all",
             ),
         )
 
         if args.module:
             # Single module mode: parse module:Class
-            config.load_models = ["__cli__"]
+            config.orchestration.load_models = ["__cli__"]
 
     # CLI overrides take precedence over config file values
     if args.port is not None:
         config.server.http_port = args.port
     if args.host is not None:
         config.server.host = args.host
-    if args.accelerator is not None:
-        config.server.accelerator = args.accelerator
-    if args.devices is not None:
-        config.server.devices = args.devices
-    if args.workers_per_device is not None:
-        config.server.workers_per_device = args.workers_per_device
     if args.http_workers is not None:
         config.server.http_workers = args.http_workers
     if args.timeout is not None:
@@ -252,12 +249,18 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 def _cmd_config_check(args: argparse.Namespace) -> int:
     try:
         config = load_config(args.config)
+        repo_path = Path(config.model_repository.path)
+        if not repo_path.is_absolute():
+            repo_path = Path(args.config).parent / repo_path
+        orch_path = repo_path / "orchestration.yaml"
+        if orch_path.exists():
+            config.orchestration = load_orchestration(orch_path)
         print(f"Configuration OK: {args.config}")
         print(f"  HTTP port: {config.server.http_port}")
         print(f"  gRPC port: {config.server.grpc_port}")
         print(f"  Metrics port: {config.server.metrics_port}")
         print(f"  Model repo: {config.model_repository.path}")
-        print(f"  Load models: {config.load_models}")
+        print(f"  Load models: {config.orchestration.load_models}")
         return 0
     except Exception as e:
         print(f"Configuration error: {e}", file=sys.stderr)

@@ -18,15 +18,12 @@ def sample_config():
             "grpc_port": 18001,
             "metrics_port": 18002,
             "host": "127.0.0.1",
-            "num_api_servers": 1,
         },
         "grpc": {"enabled": False},
         "metrics": {"enabled": False},
         "model_repository": {
             "path": "./model_repo",
-            "control_mode": "explicit",
         },
-        "load_models": ["test_model"],
     }
 
 
@@ -101,15 +98,19 @@ def isolated_model_repo(tmp_path):
         '    return x ** 3\n'
     )
 
-    # test_model/model_config.yaml
-    (repo / "test_model" / "model_config.yaml").write_text(
-        'default_version: "1"\n'
-        'load_policy: explicit\n'
-        'versions_to_load:\n'
-        '  - "1"\n'
-        '  - "2"\n'
-        'auto_activate_on_load: true\n'
-        'max_loaded_versions: 2\n'
+    # model_repo/orchestration.yaml
+    (repo / "orchestration.yaml").write_text(
+        'control_mode: explicit\n'
+        'poll_interval: 5\n'
+        'load_models:\n'
+        '  - test_model\n'
+        'models:\n'
+        '  - name: test_model\n'
+        '    load_policy: explicit\n'
+        '    versions_to_load:\n'
+        '      - "1"\n'
+        '      - "2"\n'
+        '    default_version: "1"\n'
     )
 
     # stream_model/1/model.py

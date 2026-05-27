@@ -20,18 +20,24 @@ def _start_server_with_grpc(repo_path: Path):
     grpc_port = _get_free_port()
     metrics_port = _get_free_port()
 
+    # Write orchestration.yaml into the repo
+    orch_path = repo_path / "orchestration.yaml"
+    orch_path.write_text(
+        "control_mode: explicit\n"
+        "poll_interval: 5\n"
+        "load_models:\n"
+        "  - test_model\n"
+    )
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(
             f"""
 grpc:
   enabled: true
   max_workers: 10
-load_models:
-- test_model
 metrics:
   enabled: false
 model_repository:
-  control_mode: explicit
   path: {repo_path}
 server:
   grpc_port: {grpc_port}
@@ -39,7 +45,6 @@ server:
   http_port: {http_port}
   log_level: warning
   metrics_port: {metrics_port}
-  num_api_servers: 1
   timeout: 60.0
 """
         )

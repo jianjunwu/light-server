@@ -217,7 +217,7 @@ class ModelManager:
             raise ValidationError(f"model path escapes repository: {target}")
         return target
 
-    def load(self, name: str, version: str = "1", config_override: ModelConfig | None = None) -> bool:
+    def load(self, name: str, version: str = "1") -> bool:
         """Load a model version from the repository.
 
         Spins up inference worker processes (or parses an ensemble DAG)
@@ -226,8 +226,6 @@ class ModelManager:
         Args:
             name: Model name (must match a directory in the repo).
             version: Version string, defaults to ``"1"``.
-            config_override: Optional :class:`ModelConfig` to override
-                values read from ``config.yaml``.
 
         Returns:
             ``True`` if the model was loaded successfully.
@@ -276,7 +274,7 @@ class ModelManager:
                     self.system_metrics.record_model_load(name, version, success=False)
                 return False
 
-            model_config = self._load_model_config(config_yaml, config_override)
+            model_config = self._load_model_config(config_yaml)
 
             if is_ensemble:
                 with self._model_lock:
@@ -309,8 +307,11 @@ class ModelManager:
 
             self.registry.set_status(name, version, "READY")
 
-            model_cfg = self.get_model_config(name)
-            default_version = model_cfg.get("default_version")
+            orch = self.get_orchestration()
+            model_strategy = next(
+                (m for m in orch.get("models", []) if m.get("name") == name), {}
+            )
+            default_version = model_strategy.get("default_version")
             current_active = self.registry.get_active_version(name)
             if current_active is None:
                 if default_version is not None:
@@ -392,8 +393,11 @@ class ModelManager:
             with self._model_lock:
                 self.registry.set_status(name, version, "READY")
 
-                model_cfg = self.get_model_config(name)
-                default_version = model_cfg.get("default_version")
+                orch = self.get_orchestration()
+                model_strategy = next(
+                    (m for m in orch.get("models", []) if m.get("name") == name), {}
+                )
+                default_version = model_strategy.get("default_version")
                 current_active = self.registry.get_active_version(name)
                 if current_active is None:
                     if default_version is not None:
@@ -706,19 +710,27 @@ class ModelManager:
             self.system_metrics.record_version_switch(name)
         return success
 
-    def get_model_config(self, name: str) -> dict[str, Any]:
-        """Read model-level config from model_repo/{name}/model_config.yaml."""
-        try:
-            validate_model_name(name)
-        except ValidationError as exc:
-            logger.warning(f"Invalid model name: {exc}")
-            return {}
+    def get_orchestration(self) -> dict[str, Any]:
+        """Read orchestration config from model_repo/orchestration.yaml."""
         import yaml
-        config_path = self._resolve_model_base(name) / "model_config.yaml"
+        config_path = self.repo_path / "orchestration.yaml"
         if config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
         return {}
+
+    def set_orchestration(self, data: dict[str, Any]) -> bool:
+        """Write orchestration config to model_repo/orchestration.yaml."""
+        import yaml
+        config_path = self.repo_path / "orchestration.yaml"
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to write orchestration config: {e}")
+            return False
 
     def get_version_config(self, name: str, version: str) -> dict[str, Any]:
         """Read version-level config from model_repo/{name}/{version}/config.yaml."""
@@ -754,24 +766,6 @@ class ModelManager:
             logger.exception(f"Failed to write version config: {e}")
             return False
 
-    def set_model_config(self, name: str, data: dict[str, Any]) -> bool:
-        """Write model-level config to model_repo/{name}/model_config.yaml."""
-        try:
-            validate_model_name(name)
-        except ValidationError as exc:
-            logger.warning(f"Invalid model name: {exc}")
-            return False
-        import yaml
-        config_path = self._resolve_model_base(name) / "model_config.yaml"
-        try:
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-            return True
-        except Exception as e:
-            logger.exception(f"Failed to write model config: {e}")
-            return False
-
     def shutdown(self) -> None:
         """Release all shared memory and other resources."""
         self._shm_buffer.shutdown()
@@ -785,8 +779,11 @@ class ModelManager:
 
     def _enforce_max_versions(self, name: str) -> None:
         """Unload oldest versions if max_loaded_versions is exceeded."""
-        model_cfg = self.get_model_config(name)
-        max_versions = model_cfg.get("max_loaded_versions")
+        orch = self.get_orchestration()
+        model_strategy = next(
+            (m for m in orch.get("models", []) if m.get("name") == name), {}
+        )
+        max_versions = model_strategy.get("max_loaded_versions")
         if max_versions is None:
             return
         versions = self.registry.list_versions(name)
@@ -803,36 +800,12 @@ class ModelManager:
     def _worker_key(name: str, version: str) -> str:
         return f"{name}_{version}"
 
-    def _load_model_config(self, config_yaml: Path, override: ModelConfig | None = None) -> dict[str, Any]:
+    def _load_model_config(self, config_yaml: Path) -> dict[str, Any]:
         import yaml
         config: dict[str, Any] = {}
         if config_yaml.exists():
             with open(config_yaml, "r", encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
-
-        if override:
-            if override.max_batch_size != 1:
-                config["max_batch_size"] = override.max_batch_size
-            if override.batch_timeout != 0.0:
-                config["batch_timeout"] = override.batch_timeout
-            if override.api_path != "/predict":
-                config["api_path"] = override.api_path
-            if override.stream:
-                config["stream"] = override.stream
-            if override.bidirectional:
-                config["bidirectional"] = override.bidirectional
-            if override.continuous_batching:
-                config["continuous_batching"] = override.continuous_batching
-            if override.max_sequence_length != 2048:
-                config["max_sequence_length"] = override.max_sequence_length
-            if override.accelerator:
-                config["accelerator"] = override.accelerator
-            if override.devices is not None:
-                config["devices"] = override.devices
-            if override.workers_per_device is not None:
-                config["workers_per_device"] = override.workers_per_device
-            if override.max_queue_size != 1000:
-                config["max_queue_size"] = override.max_queue_size
 
         # Continuous batching manages concurrency internally; force single worker
         if config.get("continuous_batching", False):

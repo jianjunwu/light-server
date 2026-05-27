@@ -264,17 +264,29 @@ class HTTPState:
         return result.get("success", False)
 
     async def get_model_config_api(self, name: str) -> dict[str, Any]:
-        """Get model-level config via API (avoids collision with get_model_config hook)."""
+        """Get model strategy from orchestration (replaces old per-model config)."""
         if self._model_manager is not None:
-            return self._model_manager.get_model_config(name)
-        result = await self._admin_call("get_model_config", name=name)
-        return result.get("config", {})
+            orch = self._model_manager.get_orchestration()
+            for m in orch.get("models", []):
+                if m.get("name") == name:
+                    return m
+            return {}
+        result = await self._admin_call("get_orchestration")
+        for m in result.get("config", {}).get("models", []):
+            if m.get("name") == name:
+                return m
+        return {}
 
     async def set_model_config(self, name: str, data: dict[str, Any]) -> bool:
-        """Set model-level config (direct or via IPC)."""
+        """Set model strategy in orchestration (replaces old per-model config)."""
+        data["name"] = name
         if self._model_manager is not None:
-            return self._model_manager.set_model_config(name, data)
-        result = await self._admin_call("set_model_config", name=name, data=data)
+            orch = self._model_manager.get_orchestration()
+            models = [m for m in orch.get("models", []) if m.get("name") != name]
+            models.append(data)
+            orch["models"] = models
+            return self._model_manager.set_orchestration(orch)
+        result = await self._admin_call("set_orchestration", data=data)
         return result.get("success", False)
 
     async def activate_model(self, name: str, version: str) -> bool:

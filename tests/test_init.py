@@ -38,6 +38,7 @@ class TestProjectGenerator:
         assert (root / ".github" / "workflows" / "ci.yml").exists()
         assert (root / "model_repo" / "my_model" / "1" / "model.py").exists()
         assert (root / "model_repo" / "my_model" / "1" / "config.yaml").exists()
+        assert (root / "model_repo" / "orchestration.yaml").exists()
         assert (root / "requirements.txt").exists()
         assert (root / ".gitignore").exists()
 
@@ -72,11 +73,28 @@ class TestProjectGenerator:
         yaml_text = (root / "server.yaml").read_text()
         assert "grpc:\n  enabled: false" in yaml_text
         assert "metrics:\n  enabled: true" in yaml_text
-        assert "load_models:\n  - test_m" in yaml_text
-        assert "max_batch_size: 4" in yaml_text
-        assert "stream: true" in yaml_text
+        # load_models and per-model params moved to orchestration.yaml
+        assert "load_models" not in yaml_text
+        assert "max_batch_size" not in yaml_text
 
-    def test_model_config_yaml(self, tmp_workspace: Path):
+    def test_orchestration_yaml_content(self, tmp_workspace: Path):
+        gen = ProjectGenerator(
+            project_name="orch",
+            template="empty",
+            output_dir=str(tmp_workspace),
+            options={"model_name": "test_m", "batch": True},
+        )
+        root = gen.generate()
+        orch = (root / "model_repo" / "orchestration.yaml").read_text()
+        assert "control_mode: explicit" in orch
+        assert "load_models:" in orch
+        assert "- test_m" in orch
+        assert "models:" in orch
+        assert "load_policy: explicit" in orch
+        assert "max_batch_size" not in orch
+        assert "batch_timeout" not in orch
+
+    def test_config_yaml_has_devices_workers(self, tmp_workspace: Path):
         gen = ProjectGenerator(
             project_name="cfg",
             template="empty",
@@ -87,6 +105,9 @@ class TestProjectGenerator:
         cfg = (root / "model_repo" / "my_model" / "1" / "config.yaml").read_text()
         assert "max_batch_size: 4" in cfg
         assert "batch_timeout: 0.01" in cfg
+        assert "devices:" in cfg
+        assert "workers_per_device:" in cfg
+        assert "accelerator:" in cfg
         assert "stream" not in cfg
 
     def test_duplicate_project_name_raises(self, tmp_workspace: Path):
@@ -198,32 +219,6 @@ class TestProjectGenerator:
         assert "named_proj" in readme
         assert "gpt_demo" in readme
         assert "llm" in readme
-
-
-class TestConfigModels:
-    def test_load_config_with_models_section(self, tmp_workspace: Path):
-        from light_server.config import load_config
-
-        yaml_path = tmp_workspace / "server.yaml"
-        yaml_path.write_text("""
-server:
-  http_port: 9000
-model_repository:
-  path: ./model_repo
-load_models:
-  - my_model
-models:
-  - name: my_model
-    max_batch_size: 8
-    batch_timeout: 0.05
-    stream: true
-""")
-        config = load_config(yaml_path)
-        assert len(config.models) == 1
-        assert config.models[0].name == "my_model"
-        assert config.models[0].max_batch_size == 8
-        assert config.models[0].batch_timeout == 0.05
-        assert config.models[0].stream is True
 
 
 class TestCLInit:

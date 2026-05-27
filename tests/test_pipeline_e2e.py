@@ -17,24 +17,31 @@ from tests import _get_free_port
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _make_server_config(repo_path: Path, http_port: int, load_models: list[str]) -> str:
+def _make_server_config(repo_path: Path, http_port: int) -> str:
     """Generate a minimal server config YAML."""
-    model_lines = "".join("  - " + m + "\n" for m in load_models)
     return f"""server:
   host: 127.0.0.1
   http_port: {http_port}
   log_level: warning
-  num_api_servers: 1
 grpc:
   enabled: false
 metrics:
   enabled: false
 model_repository:
   path: {repo_path}
-  control_mode: explicit
-load_models:
-{model_lines}
 """
+
+
+def _write_orchestration(repo_path: Path, load_models: list[str]) -> None:
+    """Write orchestration.yaml into the model repo."""
+    lines = [
+        "control_mode: explicit",
+        "poll_interval: 5",
+        "load_models:",
+    ]
+    for m in load_models:
+        lines.append(f"  - {m}")
+    (repo_path / "orchestration.yaml").write_text("\n".join(lines) + "\n")
 
 
 def _wait_for_server(base_url: str, timeout: float = 30.0) -> None:
@@ -118,7 +125,8 @@ def test_full_pipeline(pipeline_project: Path) -> None:
     port1 = _get_free_port()
     repo_src = pipeline_project / "model_repo"
     config = pipeline_project / "server.yaml"
-    config.write_text(_make_server_config(repo_src, port1, ["my_model"]))
+    _write_orchestration(repo_src, ["my_model"])
+    config.write_text(_make_server_config(repo_src, port1))
 
     proc = _start_server(config)
     try:
@@ -158,7 +166,8 @@ def test_full_pipeline(pipeline_project: Path) -> None:
     lma_repo = pipeline_project / "lma_repo"
     lma_repo.mkdir()
     (lma_repo / artifact.name).write_bytes(artifact.read_bytes())
-    config.write_text(_make_server_config(lma_repo, port2, ["my_model"]))
+    _write_orchestration(lma_repo, ["my_model"])
+    config.write_text(_make_server_config(lma_repo, port2))
 
     proc = _start_server(config)
     try:
@@ -190,7 +199,8 @@ def test_full_pipeline(pipeline_project: Path) -> None:
 
     # ── Step 5: serve from unpacked directory ──────────────────────────────
     port3 = _get_free_port()
-    config.write_text(_make_server_config(unpacked, port3, ["my_model"]))
+    _write_orchestration(unpacked, ["my_model"])
+    config.write_text(_make_server_config(unpacked, port3))
 
     proc = _start_server(config)
     try:

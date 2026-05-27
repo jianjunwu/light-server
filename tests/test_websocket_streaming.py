@@ -17,23 +17,30 @@ def _make_config(repo_path: Path, http_port: int) -> str:
     return f"""
 grpc:
   enabled: false
-load_models:
-  - test_model
 metrics:
   enabled: false
 model_repository:
-  control_mode: explicit
   path: {repo_path}
 server:
   host: 127.0.0.1
   http_port: {http_port}
   log_level: warning
-  num_api_servers: 1
 """
+
+
+def _write_orchestration(repo_path: Path) -> None:
+    """Write orchestration.yaml into the model repo."""
+    (repo_path / "orchestration.yaml").write_text(
+        "control_mode: explicit\n"
+        "poll_interval: 5\n"
+        "load_models:\n"
+        "  - test_model\n"
+    )
 
 
 def _start_server(repo_path: Path):
     """Start light-server with retry. Returns (proc, temp_config_path, base_url)."""
+    _write_orchestration(repo_path)
     for attempt in range(2):
         http_port = _get_free_port()
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
